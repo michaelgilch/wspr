@@ -16,8 +16,8 @@ Designed for **X11**: text is injected via `xdotool`.
 
 ## Install (recommended)
 
-`./install.sh` installs wspr for the current user and registers a systemd
-**user** service that starts it with your graphical session:
+`./install.sh` installs wspr for the current user and registers an XDG
+**autostart** entry that starts it with your graphical session:
 
 It lays things out like this:
 
@@ -26,21 +26,26 @@ It lays things out like this:
 | App code + private venv | `~/.local/share/wspr/` |
 | Launcher executable | `~/.local/bin/wspr` |
 | Config | `~/.config/wspr/wspr.toml` (created only if absent) |
-| systemd user service | `~/.config/systemd/user/wspr.service` |
+| XDG autostart entry | `~/.config/autostart/wspr.desktop` |
 
 The installer is safe to re-run — it upgrades the code, dependencies, and
-service, but never overwrites an existing config. Make sure `~/.local/bin` is
-on your `PATH` to run `wspr` directly.
+autostart entry, but never overwrites an existing config. Make sure
+`~/.local/bin` is on your `PATH` to run `wspr` directly.
 
-### Managing the service
+### Managing wspr
 
-> The service grabs the hotkey globally, so only **one** instance can run at a
-> time. Stop the service before running a dev copy from the repo (below).
+> wspr grabs the hotkey globally, so only **one** instance can run at a time.
+> Stop the running copy before launching a dev copy from the repo (below):
+>
+> ```bash
+> pkill -f wspr.py        # stop the running instance
+> pgrep -af wspr.py       # check whether it's running
+> ```
 
 ### Uninstall
 
 ```bash
-./uninstall.sh            # remove app + service, keep config
+./uninstall.sh            # remove app + autostart entry, keep config
 ./uninstall.sh --purge    # also remove ~/.config/wspr
 ```
 
@@ -112,6 +117,5 @@ not configurable.
 |------|---------|
 | `wspr.py` | The dictation engine. |
 | `wspr.toml` | Default configuration (shipped with the repo). |
-| `wspr.service` | systemd user unit, installed for autostart. |
-| `install.sh` | Installs wspr for the current user (venv, launcher, config, service). |
+| `install.sh` | Installs wspr for the current user (venv, launcher, config, autostart entry). |
 | `uninstall.sh` | Reverses the install (`--purge` also removes config). |

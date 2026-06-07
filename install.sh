@@ -3,10 +3,10 @@
 #   app + venv  -> ~/.local/share/wspr/         (code and a private venv)
 #   executable  -> ~/.local/bin/wspr            (launcher into that venv)
 #   config      -> ~/.config/wspr/wspr.toml     (created only if absent)
-#   service     -> ~/.config/systemd/user/wspr.service
+#   autostart   -> ~/.config/autostart/wspr.desktop  (XDG autostart entry)
 #
-# Safe to re-run: it upgrades code/deps and the service, but never overwrites
-# an existing config.
+# Safe to re-run: it upgrades code/deps and the autostart entry, but never
+# overwrites an existing config.
 
 set -euo pipefail
 
@@ -15,10 +15,10 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/wspr"
 CONFIG_DIR="$HOME/.config/wspr"
-UNIT_DIR="$HOME/.config/systemd/user"
+AUTOSTART_DIR="$HOME/.config/autostart"
 VENV="$APP_DIR/venv"
 
-mkdir -p "$BIN_DIR" "$APP_DIR" "$CONFIG_DIR" "$UNIT_DIR"
+mkdir -p "$BIN_DIR" "$APP_DIR" "$CONFIG_DIR" "$AUTOSTART_DIR"
 
 DEPS=(faster-whisper numpy sounddevice python-xlib)
 
@@ -34,8 +34,8 @@ else
 fi
 
 # xdotool (runtime dependency, not pip-installable) -------------------------
-# wspr types transcriptions with xdotool; without it the service runs but
-# silently produces no output.
+# wspr types transcriptions with xdotool; without it wspr runs but silently
+# produces no output.
 command -v xdotool >/dev/null 2>&1 \
     || echo "WARNING: xdotool not found — install it (e.g. sudo pacman -S xdotool)."
 
@@ -59,19 +59,25 @@ else
     echo "Installed config -> $CONFIG_DIR/wspr.toml"
 fi
 
-# systemd user service ------------------------------------------------------
-install -m 0644 "$SRC_DIR/wspr.service" "$UNIT_DIR/wspr.service"
-echo "Installed service -> $UNIT_DIR/wspr.service"
+# autostart entry -----------------------------------------------------------
+# Launched by the XDG autostart mechanism (e.g. dex) with the graphical
+# session, so it inherits DISPLAY/XAUTHORITY directly from the session.
+cat > "$AUTOSTART_DIR/wspr.desktop" <<EOF
+[Desktop Entry]
+Type=Application
+Name=wspr
+Comment=Push-to-talk voice dictation (hold Super+F1 to dictate)
+Exec=$BIN_DIR/wspr
+Terminal=false
+X-GNOME-Autostart-enabled=true
+EOF
+echo "Installed autostart -> $AUTOSTART_DIR/wspr.desktop"
 
-systemctl --user daemon-reload
-# Make the graphical environment (DISPLAY/XAUTHORITY) visible to the service.
-systemctl --user import-environment DISPLAY XAUTHORITY 2>/dev/null || true
-systemctl --user enable wspr.service >/dev/null
-echo "Enabled wspr.service (starts with your graphical session)."
-
-# Start now if we're in a graphical session.
+# (Re)start now if we're in a graphical session. Only one instance may hold the
+# hotkey grab, so stop any running copy first.
 if [ -n "${DISPLAY:-}" ]; then
-    systemctl --user restart wspr.service && echo "Started wspr.service."
+    pkill -f "$APP_DIR/wspr.py" 2>/dev/null || true
+    setsid -f "$BIN_DIR/wspr" >/dev/null 2>&1 && echo "Started wspr."
 fi
 
 echo
@@ -80,6 +86,6 @@ case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
     *) echo "NOTE: add $BIN_DIR to your PATH to run 'wspr' directly." ;;
 esac
-echo "  Status: systemctl --user status wspr.service"
-echo "  Logs:   journalctl --user -u wspr.service -f"
-echo "  Stop:   systemctl --user stop wspr.service"
+echo "  Running: pgrep -af wspr.py"
+echo "  Logs:    run 'wspr' in a terminal to see its output"
+echo "  Stop:    pkill -f wspr.py"

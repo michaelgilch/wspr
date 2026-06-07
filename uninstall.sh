@@ -9,13 +9,12 @@ PURGE=0
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/wspr"
 CONFIG_DIR="$HOME/.config/wspr"
-UNIT_DIR="$HOME/.config/systemd/user"
+AUTOSTART_DIR="$HOME/.config/autostart"
 
-# --- service ---------------------------------------------------------------
-systemctl --user disable --now wspr.service 2>/dev/null || true
-rm -f "$UNIT_DIR/wspr.service"
-systemctl --user daemon-reload 2>/dev/null || true
-echo "Removed service."
+# --- stop instance + autostart entry ---------------------------------------
+pkill -f "$APP_DIR/wspr.py" 2>/dev/null || true
+rm -f "$AUTOSTART_DIR/wspr.desktop"
+echo "Stopped wspr and removed autostart entry."
 
 # --- executable + app ------------------------------------------------------
 rm -f "$BIN_DIR/wspr"
