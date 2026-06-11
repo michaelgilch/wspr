@@ -22,6 +22,14 @@ mkdir -p "$BIN_DIR" "$APP_DIR" "$CONFIG_DIR" "$AUTOSTART_DIR"
 
 DEPS=(faster-whisper numpy sounddevice python-xlib)
 
+# CUDA (device = "cuda" in wspr.toml): ctranslate2 dlopens CUDA 12 cuBLAS and
+# cuDNN 9 at transcribe time. Distro CUDA packages may only ship newer sonames
+# (e.g. Arch's cuda 13 -> libcublas.so.13), so on NVIDIA machines ship the
+# exact libraries via pip wheels; the launcher puts them on LD_LIBRARY_PATH.
+if command -v nvidia-smi >/dev/null 2>&1; then
+    DEPS+=(nvidia-cublas-cu12 nvidia-cudnn-cu12)
+fi
+
 # venv + dependencies -------------------------------------------------------
 echo "Setting up venv at $VENV ..."
 if command -v uv >/dev/null 2>&1; then
@@ -44,8 +52,15 @@ install -m 0644 "$SRC_DIR/wspr.py" "$APP_DIR/wspr.py"
 echo "Installed app    -> $APP_DIR/wspr.py"
 
 # launcher executable -------------------------------------------------------
+# The loop puts the pip-installed CUDA 12 cuBLAS/cuDNN wheels (if present) on
+# LD_LIBRARY_PATH — ctranslate2 does not find them on its own. Harmless no-op
+# on CPU-only installs where the nvidia/ directories don't exist.
 cat > "$BIN_DIR/wspr" <<EOF
 #!/usr/bin/env bash
+for libdir in "$VENV"/lib/python*/site-packages/nvidia/{cublas,cudnn}/lib; do
+    [ -d "\$libdir" ] && LD_LIBRARY_PATH="\${LD_LIBRARY_PATH:+\$LD_LIBRARY_PATH:}\$libdir"
+done
+export LD_LIBRARY_PATH
 exec "$VENV/bin/python" "$APP_DIR/wspr.py" "\$@"
 EOF
 chmod +x "$BIN_DIR/wspr"

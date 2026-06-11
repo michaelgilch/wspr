@@ -107,6 +107,21 @@ Edit the file and restart wspr — no code changes needed. A larger `size`
 (`base.en`, `tiny.en`) is faster. `device = "cuda"` with
 `compute_type = "float16"` runs on a GPU.
 
+### CUDA
+
+ctranslate2 (faster-whisper's engine) needs CUDA 12's cuBLAS and cuDNN 9 at
+runtime, which distro CUDA packages often don't provide (e.g. Arch's `cuda 13`
+only ships `libcublas.so.13`). `install.sh` handles this automatically on
+machines with an NVIDIA GPU: it installs the `nvidia-cublas-cu12` and
+`nvidia-cudnn-cu12` wheels into the venv and the launcher puts them on
+`LD_LIBRARY_PATH`. For a dev checkout, do the same by hand:
+
+```bash
+uv pip install --python .venv/bin/python nvidia-cublas-cu12 nvidia-cudnn-cu12
+sp=$(.venv/bin/python -c 'import site; print(site.getsitepackages()[0])')
+LD_LIBRARY_PATH="$sp/nvidia/cublas/lib:$sp/nvidia/cudnn/lib" ./.venv/bin/python wspr.py
+```
+
 The audio format (16 kHz mono) and transcription language (English) are fixed
 in the code — both are requirements of the `.en` Whisper models — so they are
 not configurable.
