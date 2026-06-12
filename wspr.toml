@@ -1,7 +1,7 @@
 # wspr configuration
 
 [hotkey]
-combo = "super+f1"
+combo = "super+space"
 
 [model]
 size = "small.en"     	# tiny.en, base.en, small.en, medium, large-v3

@@ -192,7 +192,7 @@ def main() -> None:
     model_size = model_cfg.get("size", "base.en")
     device = model_cfg.get("device", "cpu")
     compute_type = model_cfg.get("compute_type", "int8")
-    combo = cfg.get("hotkey", {}).get("combo", "super+f1")
+    combo = cfg.get("hotkey", {}).get("combo", "super+space")
 
     # Open a connection to X server ($DISPLAY)
     disp = display.Display()
