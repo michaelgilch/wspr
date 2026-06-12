@@ -1,11 +1,10 @@
 # wspr
 
-Push-to-talk voice dictation. Hold a hotkey (default **Super+F1**), speak,
-release — the audio is transcribed locally with
-[faster-whisper](https://github.com/SYSTRAN/faster-whisper) and typed into
-whatever window has focus.
-
-Designed for **X11**: text is injected via `xdotool`.
+**wspr** is a push-to-talk voice dication tool for Linux/X11. You hold a hotkey
+(default Super+Space), speak, and release. The audio is transcribed locally with
+faster-whisper and typed into whatever window has focus via `xdotool`.
+No cloud, no daemon framework, just a single long-running Python script started
+by your graphical session.
 
 ## Requirements
 
@@ -63,7 +62,7 @@ uv pip install --python .venv/bin/python faster-whisper numpy sounddevice python
 On first run the configured model is downloaded to your Hugging Face cache.
 Then:
 
-1. **Hold** the hotkey (default **Super+F1**) and speak.
+1. **Hold** the hotkey (default **Super+Space**) and speak.
 2. **Release** it — wspr transcribes the audio.
 3. The text is typed into the focused window.
 
@@ -94,13 +93,20 @@ the XDG file. The search stops at the first match.
 # Trigger: a function key (f1-f20), a named key (space, enter, tab, esc,
 # backspace), or a single character. Examples: "super+f1", "ctrl+alt+space",
 # "f9".
-combo = "super+f1"
+combo = "super+space"
 
 [model]
 size = "small.en"     # tiny.en / base.en / small.en / medium / large-v3
 device = "cpu"        # cpu / cuda
 compute_type = "int8" # int8 (CPU) / float16 (GPU)
 ```
+
+> **Note:** the combo must not already be bound by your desktop environment
+> or window manager — **Super+Space** in particular is a common default for
+> input-method/layout switching (GNOME, KDE) and app launchers. If something
+> else has already grabbed the key, wspr exits at startup with
+> `Could not grab super+space: it's already bound.` — free the binding in
+> your DE/WM or pick a different combo.
 
 Edit the file and restart wspr — no code changes needed. A larger `size`
 (e.g. `medium`) improves accuracy at the cost of speed; a smaller one
