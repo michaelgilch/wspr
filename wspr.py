@@ -1,4 +1,6 @@
 import queue
+import shutil
+import subprocess
 import sys
 import time
 from dataclasses import dataclass
@@ -151,8 +153,23 @@ class Recorder:
         return np.concatenate(chunks, axis=0).reshape(-1)
 
 
+def sink_type(text: str) -> None:
+    """Type the transcript into the focused window via xdotool."""
+    # --clearmodifiers releases any held modifier (e.g. Super still down from
+    # the hotkey) so it doesn not corrupt the output.
+    # The trailing space keeps consecutive dictations from running together.
+    # check=False 
+    subprocess.run(["xdotool", "type", "--clearmodifiers", "--", text + " "])
+
+
 def main() -> None:
-    # Open a connection to the root of the X server. XGrabKey registers to a 
+    # xdotool is a system package (not pip-installable). Without it the type
+    # sink silently does nothing, so warn early rather than fail invisibly.
+    if shutil.which("xdotool") is None:
+        print("WARNING: xdotool not found; transcripts cannot be typed.",
+              file=sys.stderr)
+
+    # Open a connection to the root of the X server. XGrabKey registers to a
     # window, but we want to work in any window, so we use the root window.
     disp = display.Display()
     root = disp.screen().root
@@ -241,6 +258,7 @@ def main() -> None:
                 text = " ".join(seg.text.strip() for seg in segments).strip()
                 if text:
                     print(f"  -> {text!r}")
+                    sink_type(text)
                 else:
                     print("  (no speech detected)")
 
