@@ -1,9 +1,12 @@
+import os
 import queue
 import shutil
+import socket
 import subprocess
 import sys
 import time
 from dataclasses import dataclass
+from pathlib import Path
 
 import numpy as np
 import sounddevice as sd
@@ -13,6 +16,9 @@ from Xlib import X, XK, display
 
 SAMPLE_RATE = 16000     # faster-whisper expects 16 kHz
 CHANNELS = 1            # mono
+
+# Default path for the socket sink, setup by test_listener.py
+DEFAULT_SOCKET = str(Path(os.environ["XDG_RUNTIME_DIR"]) / "wspr.sock")
 
 # Map of modifier name strings to the X bitmask constants they represent.
 MODIFIER_MASKS: dict[str, int] = {
@@ -40,9 +46,11 @@ IGNORED_MOD_MASKS = [0, X.LockMask, X.Mod2Mask, X.LockMask | X.Mod2Mask]
 @dataclass
 class Binding:
     """One push-to-talk hotkey: the original string plus the X grab values."""
-    combo:   str    # human-readable, e.g. "super+space"
-    mask:    int    # X modifier bitmask
-    keycode: int    # X keycode for the trigger key
+    combo:       str                    # human-readable, e.g. "super+space"
+    mask:        int                    # X modifier bitmask
+    keycode:     int                    # X keycode for the trigger key
+    sink:        str = "type"           # where to send: type | socket
+    socket_path: str = DEFAULT_SOCKET   # destination when sink == "socket"
 
 
 def trigger_keysym(name: str) -> int:
@@ -162,6 +170,31 @@ def sink_type(text: str) -> None:
     subprocess.run(["xdotool", "type", "--clearmodifiers", "--", text + " "])
 
 
+def sink_socket(text: str, path: str) -> None:
+    """Send the transcript over a Unix socket for another program to consume."""
+    try:
+        # One connection per transcript: connect, send, close.
+        # AF_UNIX: Address family for interprocess comm on same machine.
+        # SOCK_STREAM: Stream of text with connection to listener.
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as c:
+            # Open a connection to the application listening at 'path'
+            c.connect(path)
+            # Encode as UTF-8 bytes. Decode reverses on the receiving side.
+            c.sendall(text.encode())
+    except OSError as e:
+        # Missing listener raises OSError. Report and swallow so it doesn't 
+        # crash the loop.
+        print(f"Socket sink failed: {e}", file=sys.stderr)
+
+
+def emit(text: str, binding: Binding) -> None:
+    """Route a transcript to whichever sink its binding selects."""
+    if binding.sink == "socket":
+        sink_socket(text, binding.socket_path)
+    else:
+        sink_type(text)
+
+
 def main() -> None:
     # xdotool is a system package (not pip-installable). Without it the type
     # sink silently does nothing, so warn early rather than fail invisibly.
@@ -176,6 +209,7 @@ def main() -> None:
 
     # Convert the hotkey string to a Binding (modifier bitmask and keycode)
     binding = parse_hotkey("super+space", disp)
+    binding.sink = "socket"   # TEMP: route to the socket sink to test it; config will set this per-hotkey ***********
 
     # Grabbing keys in X is weird!
     # X returns keygrabs asynchronously, so it may take a while, and cause issues
@@ -258,7 +292,7 @@ def main() -> None:
                 text = " ".join(seg.text.strip() for seg in segments).strip()
                 if text:
                     print(f"  -> {text!r}")
-                    sink_type(text)
+                    emit(text, binding)
                 else:
                     print("  (no speech detected)")
 
