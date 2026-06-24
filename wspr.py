@@ -4,6 +4,7 @@ import shutil
 import socket
 import subprocess
 import sys
+import threading
 import time
 import tomllib
 from dataclasses import dataclass
@@ -337,6 +338,18 @@ def main() -> None:
                 return b
         return None
 
+    def transcribe_and_emit(audio, duration, binding) -> None:
+        # Runs on a background thread so transcription doesn't block the event
+        # loop and the hotkey stays responsive for the next take.
+        print(f"Transcribing {duration:.1f}s of audio...")
+        segments, _ = model.transcribe(audio, language="en")
+        text = " ".join(seg.text.strip() for seg in segments).strip()
+        if text:
+            print(f"  -> {text!r}")
+            emit(text, binding)
+        else:
+            print("  (no speech detected)")
+
     recording: Binding | None = None
     start_time = 0.0
 
@@ -369,14 +382,13 @@ def main() -> None:
                 print("Stopped.")
                 audio = recorder.stop()
 
-                print(f"Transcribing {duration:.1f}s of audio...")
-                segments, _ = model.transcribe(audio, language="en")
-                text = " ".join(seg.text.strip() for seg in segments).strip()
-                if text:
-                    print(f"  -> {text!r}")
-                    emit(text, binding)
-                else:
-                    print("  (no speech detected)")
+                # Transcribe off the event loop to free the hotkey.
+                # daemon=True so an active transcription doesn't block Ctrl-C
+                threading.Thread(
+                    target=transcribe_and_emit,
+                    args=(audio, duration, binding),
+                    daemon=True,
+                ).start()
 
     except KeyboardInterrupt:
         print("\nBye.")
