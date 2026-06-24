@@ -5,6 +5,7 @@ import socket
 import subprocess
 import sys
 import time
+import tomllib
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -19,6 +20,9 @@ CHANNELS = 1            # mono
 
 # Default path for the socket sink, setup by test_listener.py
 DEFAULT_SOCKET = str(Path(os.environ["XDG_RUNTIME_DIR"]) / "wspr.sock")
+
+# Valid sink values for a hotkey binding to check for when parsing config.
+SINKS = ("type", "socket")
 
 # Map of modifier name strings to the X bitmask constants they represent.
 MODIFIER_MASKS: dict[str, int] = {
@@ -195,6 +199,52 @@ def emit(text: str, binding: Binding) -> None:
         sink_type(text)
 
 
+def find_config_path() -> Path | None:
+    """Return the config path to load, or None if there is none.
+
+    Walks the priority cascade and returns the first existing config path, or 
+    None. ($WSPR_CONFIG --> ./wspr.toml --> ~/.config/wspr/wspr.toml)
+    """
+    env = os.environ.get("WSPR_CONFIG")
+    if env:
+        return Path(env).expanduser()
+    here = Path(__file__).resolve().parent / "wspr.toml"
+    if here.exists():
+        return here
+    xdg = Path.home() / ".config" / "wspr" / "wspr.toml"
+    if xdg.exists():
+        return xdg
+    return None
+
+
+def parse_bindings(cfg: dict, disp) -> list[Binding]:
+    """Build the hotkey bindings from parsed config.
+
+    Each [[hotkeys]] entry needs a 'combo' and may set 'sink' (type | socket,
+    default type) and 'socket' (the path for the socket sink). Raises
+    ValueError on a missing combo, an unknown sink, or a duplicate combo.
+    """
+    bindings: list[Binding] = []
+    seen: set[tuple[int, int]] = set()
+    for entry in cfg.get("hotkeys", []):
+        combo = entry.get("combo")
+        if not combo:
+            raise ValueError("[[hotkeys]] entry is missing 'combo'")
+        sink = entry.get("sink", "type")
+        if sink not in SINKS:
+            raise ValueError(f"Unknown sink {sink!r} for hotkey {combo!r} "
+                             f"(expected one of {', '.join(SINKS)})")
+        binding = parse_hotkey(combo, disp)
+        binding.sink = sink
+        binding.socket_path = str(entry.get("socket", DEFAULT_SOCKET))
+        # X refuses a second grab of the same key+modifiers, so catch it here.
+        if (binding.keycode, binding.mask) in seen:
+            raise ValueError(f"Duplicate hotkey {combo!r}")
+        seen.add((binding.keycode, binding.mask))
+        bindings.append(binding)
+    return bindings
+
+
 def main() -> None:
     # xdotool is a system package (not pip-installable). Without it the type
     # sink silently does nothing, so warn early rather than fail invisibly.
@@ -207,33 +257,48 @@ def main() -> None:
     disp = display.Display()
     root = disp.screen().root
 
-    # Convert the hotkey string to a Binding (modifier bitmask and keycode)
-    binding = parse_hotkey("super+space", disp)
-    binding.sink = "socket"   # TEMP: route to the socket sink to test it; config will set this per-hotkey ***********
+    # Load config to build the hotkey bindings
+    config_path = find_config_path()
+    if config_path is not None and config_path.exists():
+        with open(config_path, "rb") as f:
+            cfg = tomllib.load(f)
+        print(f"Loaded config from {config_path}")
+    else:
+        cfg = {}
+        print("WARNING: no config file found; using default super+space -> type text.",
+              file=sys.stderr)
+
+    # Convert config to bindings
+    bindings = parse_bindings(cfg, disp)
+    if not bindings:
+        # For no config or no hotkey definitions in config, use default
+        bindings = [parse_hotkey("super+space", disp)]
 
     # Grabbing keys in X is weird!
     # X returns keygrabs asynchronously, so it may take a while, and cause issues
     # if the key is already taken by X (multiple attempts to find a key combo that
-    # worked for me). Setting a flag for errors and syncing seems to fix it. If 
+    # worked for me). Setting a flag for errors and syncing seems to fix it. If
     # the flag is set, the combo is already taken.
+    # Grab one at a time, syncing after each, so a failure names the bad combo.
     grab_failed = {"hit": False}
     disp.set_error_handler(lambda err, req: grab_failed.__setitem__("hit", True))
-    # Send the grab request to X
-    grab_hotkey(root, binding.keycode, binding.mask)
-    # Force flushing of all pending requests (due to async returns) to ensure we
-    # have a reliably set grab_failed flag
-    disp.sync()
-    if grab_failed["hit"]:
-        print(f"Could not grab {binding.combo}: already bound by another program.",
-              file=sys.stderr)
-        return
+    for b in bindings:
+        grab_hotkey(root, b.keycode, b.mask)
+        disp.sync()
+        if grab_failed["hit"]:
+            print(f"Could not grab {b.combo}: already bound by another program.",
+                  file=sys.stderr)
+            return
     disp.set_error_handler(None)
 
     print("Loading faster-whisper model...")
     model = WhisperModel("base.en", device="cpu", compute_type="int8")
     recorder = Recorder(SAMPLE_RATE, CHANNELS)
 
-    print(f"Ready. Hold {binding.combo} to record, release to transcribe. Ctrl-C to quit.")
+    print("Ready. Hold a hotkey to record, release to transcribe. Ctrl-C to quit.")
+    for b in bindings:
+        dest = f"socket {b.socket_path}" if b.sink == "socket" else b.sink
+        print(f"  {b.combo}  ->  {dest}")
 
     # Holding down keys does not silence until you let go. X sends stram of fake 
     # release+press events. Naive loops see the first release and think 
@@ -249,7 +314,7 @@ def main() -> None:
             return ev
         return disp.next_event()
 
-    def is_autorepeat(release_ev) -> bool:
+    def is_autorepeat(release_event) -> bool:
         # Peek ahead to see if the next event is a genuine release
         nonlocal buffered
         if buffered is None and disp.pending_events():
@@ -257,13 +322,22 @@ def main() -> None:
         nxt = buffered
         if (nxt is not None # All 4 match for an autorepeat event
                 and nxt.type == X.KeyPress 
-                and nxt.detail == release_ev.detail # the keycode on a key event
-                and nxt.time == release_ev.time):
+                and nxt.detail == release_event.detail # the keycode on a key event
+                and nxt.time == release_event.time):
             buffered = None     # consume the paired press; key is still held
             return True
         return False
 
-    recording = False
+    def match_binding(press_event) -> Binding | None:
+        # A grab only fires for registered combos, so keycode + modifier state
+        # (minus the lock modifiers) identifies which binding was pressed.
+        state = press_event.state & ~(X.LockMask | X.Mod2Mask)
+        for b in bindings:
+            if press_event.detail == b.keycode and state == b.mask:
+                return b
+        return None
+
+    recording: Binding | None = None
     start_time = 0.0
 
     try:
@@ -274,19 +348,27 @@ def main() -> None:
             if event.type not in (X.KeyPress, X.KeyRelease):
                 continue
 
-            if event.type == X.KeyPress and not recording:
-                recording = True
+            if event.type == X.KeyPress and recording is None:
+                binding = match_binding(event)
+                if binding is None:
+                    # Some other key delivered during a grab
+                    continue
+                recording = binding
                 start_time = time.monotonic()
                 print(f"Recording ({binding.combo})...")
                 recorder.start()
 
-            elif event.type == X.KeyRelease and recording:
+            elif event.type == X.KeyRelease and recording is not None:
+                # Stop as soon as any key is released: the whole combo must stay
+                # held to keep recording.
                 if is_autorepeat(event):
+                    # Detected fake release
                     continue
-                recording = False
+                binding, recording = recording, None
                 duration = time.monotonic() - start_time
                 print("Stopped.")
                 audio = recorder.stop()
+
                 print(f"Transcribing {duration:.1f}s of audio...")
                 segments, _ = model.transcribe(audio, language="en")
                 text = " ".join(seg.text.strip() for seg in segments).strip()
@@ -299,7 +381,8 @@ def main() -> None:
     except KeyboardInterrupt:
         print("\nBye.")
     finally:
-        ungrab_hotkey(root, binding.keycode, binding.mask)
+        for b in bindings:
+            ungrab_hotkey(root, b.keycode, b.mask)
         disp.flush()
 
 

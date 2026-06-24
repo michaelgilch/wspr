@@ -1,0 +1,10 @@
+# wspr configuration
+
+[[hotkeys]]
+combo = "super+space"
+sink = "type"
+
+[[hotkeys]]
+combo = "super+alt+d"
+sink = "socket"
+#socket = "$XDG_RUNTIME_DIR/wspr.sock"
