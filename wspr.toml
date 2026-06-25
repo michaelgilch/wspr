@@ -8,3 +8,8 @@ sink = "type"
 combo = "super+alt+d"
 sink = "socket"
 #socket = "$XDG_RUNTIME_DIR/wspr.sock"
+
+[model]
+size = "base.en"       # tiny.en, base.en, small.en, medium, large-v3
+device = "cpu"         # cpu, cuda
+compute_type = "int8"  # int8 (CPU), float16 (GPU)

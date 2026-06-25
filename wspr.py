@@ -303,8 +303,14 @@ def main() -> None:
             return
     disp.set_error_handler(None)
 
-    print("Loading faster-whisper model...")
-    model = WhisperModel("base.en", device="cpu", compute_type="int8")
+    # Get model settings from config
+    model_cfg = cfg.get("model", {})
+    model_size = model_cfg.get("size", "base.en")
+    device = model_cfg.get("device", "cpu")
+    compute_type = model_cfg.get("compute_type", "int8")
+
+    print(f"Loading faster-whisper model '{model_size}' ({device}/{compute_type})...")
+    model = WhisperModel(model_size, device=device, compute_type=compute_type)
     recorder = Recorder(SAMPLE_RATE, CHANNELS)
 
     print("Ready. Hold a hotkey to record, release to transcribe. Ctrl-C to quit.")
