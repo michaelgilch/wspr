@@ -166,6 +166,11 @@ class Recorder:
         return np.concatenate(chunks, axis=0).reshape(-1)
 
 
+def notify(body: str) -> None:
+    """Show a desktop notification."""
+    subprocess.run(["notify-send", "wspr", body], check=False)
+
+
 def sink_type(text: str) -> None:
     """Type the transcript into the focused window via xdotool."""
     # --clearmodifiers releases any held modifier (e.g. Super still down from
@@ -190,6 +195,7 @@ def sink_socket(text: str, path: str) -> None:
         # Missing listener raises OSError. Report and swallow so it doesn't 
         # crash the loop.
         print(f"Socket sink failed: {e}", file=sys.stderr)
+        notify("socket sink failed: is the listener running?")
 
 
 def emit(text: str, binding: Binding) -> None:
@@ -252,6 +258,10 @@ def main() -> None:
     if shutil.which("xdotool") is None:
         print("WARNING: xdotool not found; transcripts cannot be typed.",
               file=sys.stderr)
+    # notify-send (libnotify) is wspr's only visible feedback when headless.
+    if shutil.which("notify-send") is None:
+        print("WARNING: notify-send not found; desktop notifications disabled.",
+              file=sys.stderr)
 
     # Open a connection to the root of the X server. XGrabKey registers to a
     # window, but we want to work in any window, so we use the root window.
@@ -287,8 +297,9 @@ def main() -> None:
         grab_hotkey(root, b.keycode, b.mask)
         disp.sync()
         if grab_failed["hit"]:
-            print(f"Could not grab {b.combo}: already bound by another program.",
-                  file=sys.stderr)
+            msg = f"Could not grab {b.combo}: already bound by another program."
+            print(msg, file=sys.stderr)
+            notify(msg)
             return
     disp.set_error_handler(None)
 
@@ -300,6 +311,7 @@ def main() -> None:
     for b in bindings:
         dest = f"socket {b.socket_path}" if b.sink == "socket" else b.sink
         print(f"  {b.combo}  ->  {dest}")
+    notify("Ready: " + ", ".join(b.combo for b in bindings))
 
     # Holding down keys does not silence until you let go. X sends stram of fake 
     # release+press events. Naive loops see the first release and think 
