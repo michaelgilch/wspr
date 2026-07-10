@@ -13,7 +13,7 @@ A second sink, with its own hotkey, opens a Unix socket to a listener. This sock
 For plain dictation, I probably wouldn't. Plenty of tools already exist. However, I couldn't find anything that matched my exact needs:
 
 - **Model choice**. I wanted fully local and accurate. **faster-whisper** is noticably better than some of the alternatives packaged with existing tools.
-- **Socket sink**. I could not find a tool that gave me steaming over a Unix socket to _any_ listener. I wanted composability to not re-invent the wheel each time I have an idea.
+- **Socket sink**. I could not find a tool that gave me streaming over a Unix socket to _any_ listener. I wanted composability to not re-invent the wheel each time I have an idea.
 
 ## Requirements
 
