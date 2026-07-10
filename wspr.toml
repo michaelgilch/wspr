@@ -5,7 +5,7 @@ combo = "super+space"
 sink = "type"
 
 [[hotkeys]]
-combo = "super+alt+d"
+combo = "super+shift+d"
 sink = "socket"
 #socket = "$XDG_RUNTIME_DIR/wspr.sock"
 
