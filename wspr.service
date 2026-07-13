@@ -1,0 +1,10 @@
+[Unit]
+Description=wspr push-to-talk voice dictation
+
+[Service]
+# stdout is a journald pipe, not a tty. 
+# Without this, Python block-buffers and only prints and logs on exit.
+Environment=PYTHONUNBUFFERED=1
+ExecStart=%h/.local/bin/wspr
+Restart=on-failure
+RestartSec=2

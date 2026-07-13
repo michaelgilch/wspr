@@ -45,14 +45,31 @@ It sets everything up under your home directory (no root needed):
 | App + private venv  | `~/.local/share/wspr/`                      |
 | Launcher executable | `~/.local/bin/wspr`                         |
 | Default config      | `~/.config/wspr/wspr.toml` (only if absent) |
-| Autostart entry     | `~/.config/autostart/wspr.desktop`          |
+| systemd user unit   | `~/.config/systemd/user/wspr.service`       |
 
 It creates the venv, installs the dependencies from `requirements.txt`, and (if
 `nvidia-smi` is present) adds the CUDA cuBLAS/cuDNN wheels for `device = "cuda"`.
-The installer is safe to re-run: it upgrades the code, dependencies, and
-autostart entry, but never overwrites an existing config. If you're already in a
-graphical session it (re)starts wspr immediately, and the autostart entry launches
-it on future logins.
+The installer is safe to re-run: it upgrades the code, dependencies, and unit,
+but never overwrites an existing config. If you're already in a graphical
+session it (re)starts the service immediately.
+
+The unit is deliberately **not enabled**: wspr needs the session's
+`DISPLAY`/`XAUTHORITY`, which don't exist until X starts, so systemd must not
+launch it at boot. Instead, have your window manager start it once the session
+is up. For i3:
+
+```
+exec --no-startup-id systemctl --user import-environment DISPLAY XAUTHORITY && systemctl --user restart wspr.service
+```
+
+The service restarts automatically on failure, and its output goes to the
+journal:
+
+```sh
+systemctl --user status wspr    # is it running?
+journalctl --user -u wspr -f    # follow logs
+systemctl --user stop wspr      # stop it
+```
 
 If `~/.local/bin` isn't on your `PATH`, the installer prints a note; add it to
 run `wspr` directly.

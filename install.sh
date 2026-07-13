@@ -3,10 +3,10 @@
 #   app + venv  -> ~/.local/share/wspr/         (code and a private venv)
 #   executable  -> ~/.local/bin/wspr            (launcher into that venv)
 #   config      -> ~/.config/wspr/wspr.toml     (created only if absent)
-#   autostart   -> ~/.config/autostart/wspr.desktop  (XDG autostart entry)
+#   unit        -> ~/.config/systemd/user/wspr.service  (systemd user service)
 #
-# Safe to re-run: it upgrades code/deps and the autostart entry, but never
-# overwrites an existing config.
+# Safe to re-run: it upgrades code/deps and the unit, but never overwrites an
+# existing config.
 
 set -euo pipefail
 
@@ -15,10 +15,10 @@ SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/wspr"
 CONFIG_DIR="$HOME/.config/wspr"
-AUTOSTART_DIR="$HOME/.config/autostart"
+SYSTEMD_DIR="$HOME/.config/systemd/user"
 VENV="$APP_DIR/venv"
 
-mkdir -p "$BIN_DIR" "$APP_DIR" "$CONFIG_DIR" "$AUTOSTART_DIR"
+mkdir -p "$BIN_DIR" "$APP_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR"
 
 # venv + dependencies -------------------------------------------------------
 # Runtime deps live in requirements.txt (the source of truth). On NVIDIA
@@ -78,25 +78,20 @@ else
     echo "Installed config -> $CONFIG_DIR/wspr.toml"
 fi
 
-# autostart entry -----------------------------------------------------------
-# Launched by the XDG autostart mechanism (e.g. dex) with the graphical
-# session, so it inherits DISPLAY/XAUTHORITY directly from the session.
-cat > "$AUTOSTART_DIR/wspr.desktop" <<EOF
-[Desktop Entry]
-Type=Application
-Name=wspr
-Comment=Push-to-talk voice dictation (hold Super+Space to dictate)
-Exec=$BIN_DIR/wspr
-Terminal=false
-X-GNOME-Autostart-enabled=true
-EOF
-echo "Installed autostart -> $AUTOSTART_DIR/wspr.desktop"
+# systemd user unit ----------------------------------------------------------
+# Not enabled: systemd would start it before X exists. The window manager
+# starts it after importing DISPLAY/XAUTHORITY into the systemd user
+# environment (see README).
+install -m 0644 "$SRC_DIR/wspr.service" "$SYSTEMD_DIR/wspr.service"
+systemctl --user daemon-reload
+echo "Installed unit   -> $SYSTEMD_DIR/wspr.service"
 
-# (Re)start now if we're in a graphical session. Only one instance may hold the
-# hotkey grab, so stop any running copy first.
+# (Re)start now if we're in a graphical session. The unit is the
+# single-instance mechanism: restart replaces any managed copy, and only one
+# instance may hold the hotkey grab anyway.
 if [ -n "${DISPLAY:-}" ]; then
-    pkill -f "$APP_DIR/wspr.py" 2>/dev/null || true
-    setsid -f "$BIN_DIR/wspr" >/dev/null 2>&1 && echo "Started wspr."
+    systemctl --user import-environment DISPLAY XAUTHORITY
+    systemctl --user restart wspr.service && echo "Started wspr."
 fi
 
 echo
@@ -105,6 +100,6 @@ case ":$PATH:" in
     *":$BIN_DIR:"*) ;;
     *) echo "NOTE: add $BIN_DIR to your PATH to run 'wspr' directly." ;;
 esac
-echo "  Running: pgrep -af wspr.py"
-echo "  Logs:    run 'wspr' in a terminal to see its output"
-echo "  Stop:    pkill -f wspr.py"
+echo "  Running: systemctl --user status wspr"
+echo "  Logs:    journalctl --user -u wspr -f"
+echo "  Stop:    systemctl --user stop wspr"
