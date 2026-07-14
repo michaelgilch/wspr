@@ -1,15 +1,41 @@
 # wspr configuration
 
+# Each [[hotkeys]] entry is a push-to-talk binding: hold the combo, speak,
+# release, and the transcript goes to that entry's sink:
+#   type    - typed into the focused window via xdotool
+#   socket  - sent over a Unix socket; optional `socket` key overrides
+#             the default $XDG_RUNTIME_DIR/wspr.sock
+#   command - routed through a local LLM (Ollama) onto a whitelisted
+#             i3 action and executed (see [ollama])
+
 [[hotkeys]]
 combo = "super+space"
 sink = "type"
 
 [[hotkeys]]
 combo = "super+shift+d"
-sink = "socket"
+sink = "command"
+
+# Example socket binding. The [[hotkeys]] header must be commented out too:
+# a bare header with no keys is an empty entry, which fails at startup.
+#[[hotkeys]]
+#combo = "super+shift+d"
+#sink = "socket"
 #socket = "$XDG_RUNTIME_DIR/wspr.sock"
 
+# [model] is the speech-to-text stage: the local faster-whisper model that
+# turns recorded audio into a transcript. Every binding uses it, no matter
+# which sink the transcript then goes to.
 [model]
 size = "base.en"       # tiny.en, base.en, small.en, medium, large-v3
 device = "cpu"         # cpu, cuda
 compute_type = "int8"  # int8 (CPU), float16 (GPU)
+
+# [ollama] is the routing stage, used only by `command` bindings: the
+# transcript goes to this local Ollama model, which maps it onto the action
+# whitelist (or rejects it). Dictation never touches Ollama.
+[ollama]
+# url = "http://localhost:11434"
+# model = "gemma3:1b"
+# timeout = 30         # seconds to wait for a routing reply
+# keep_alive = "30m"   # how long Ollama keeps the model warm after a request

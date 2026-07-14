@@ -1,3 +1,4 @@
+import argparse
 import os
 import queue
 import shutil
@@ -23,7 +24,7 @@ CHANNELS = 1            # mono
 DEFAULT_SOCKET = str(Path(os.environ["XDG_RUNTIME_DIR"]) / "wspr.sock")
 
 # Valid sink values for a hotkey binding to check for when parsing config.
-SINKS = ("type", "socket")
+SINKS = ("type", "socket", "command")
 
 # Map of modifier name strings to the X bitmask constants they represent.
 MODIFIER_MASKS: dict[str, int] = {
@@ -54,7 +55,7 @@ class Binding:
     combo:       str                    # human-readable, e.g. "super+space"
     mask:        int                    # X modifier bitmask
     keycode:     int                    # X keycode for the trigger key
-    sink:        str = "type"           # where to send: type | socket
+    sink:        str = "type"           # where to send: type | socket | command
     socket_path: str = DEFAULT_SOCKET   # destination when sink == "socket"
 
 
@@ -198,10 +199,14 @@ def sink_socket(text: str, path: str) -> None:
         notify("socket sink failed: is the listener running?")
 
 
-def emit(text: str, binding: Binding) -> None:
+def emit(text: str, binding: Binding, cfg: dict) -> None:
     """Route a transcript to whichever sink its binding selects."""
     if binding.sink == "socket":
         sink_socket(text, binding.socket_path)
+    elif binding.sink == "command":
+        # Imported on first use so dictation-only configs never load it.
+        import command
+        command.handle(text, cfg)
     else:
         sink_type(text)
 
@@ -222,6 +227,17 @@ def find_config_path() -> Path | None:
     if xdg.exists():
         return xdg
     return None
+
+
+def load_config() -> dict:
+    """Load the TOML config from the cascade, or {} when there is none."""
+    path = find_config_path()
+    if path is None or not path.exists():
+        return {}
+    with open(path, "rb") as f:       # tomllib insists on binary mode
+        cfg = tomllib.load(f)
+    print(f"Loaded config from {path}")
+    return cfg
 
 
 def parse_bindings(cfg: dict, disp) -> list[Binding]:
@@ -252,7 +268,24 @@ def parse_bindings(cfg: dict, disp) -> list[Binding]:
     return bindings
 
 
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="wspr",
+        description="Push-to-talk dictation daemon. Run with no arguments.")
+    sub = parser.add_subparsers(dest="cmd")
+    p_exec = sub.add_parser(
+        "exec", help="route one transcript through the command sink and execute it")
+    p_exec.add_argument("text", nargs="+", help="the transcript to route")
+    return parser.parse_args()
+
+
 def main() -> None:
+    args = parse_args()
+    if args.cmd == "exec":
+        import command
+        command.handle(" ".join(args.text), load_config())
+        return
+
     # xdotool is a system package (not pip-installable). Without it the type
     # sink silently does nothing, so warn early rather than fail invisibly.
     if shutil.which("xdotool") is None:
@@ -269,13 +302,8 @@ def main() -> None:
     root = disp.screen().root
 
     # Load config to build the hotkey bindings
-    config_path = find_config_path()
-    if config_path is not None and config_path.exists():
-        with open(config_path, "rb") as f:
-            cfg = tomllib.load(f)
-        print(f"Loaded config from {config_path}")
-    else:
-        cfg = {}
+    cfg = load_config()
+    if not cfg:
         print("WARNING: no config file found; using default super+space -> type text.",
               file=sys.stderr)
 
@@ -364,7 +392,7 @@ def main() -> None:
         text = " ".join(seg.text.strip() for seg in segments).strip()
         if text:
             print(f"  -> {text!r}")
-            emit(text, binding)
+            emit(text, binding, cfg)
         else:
             print("  (no speech detected)")
 

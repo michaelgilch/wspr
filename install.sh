@@ -52,8 +52,10 @@ command -v notify-send >/dev/null 2>&1 \
     || echo "WARNING: notify-send not found - install libnotify for desktop notifications."
 
 # application code ----------------------------------------------------------
-install -m 0644 "$SRC_DIR/wspr.py" "$APP_DIR/wspr.py"
-echo "Installed app    -> $APP_DIR/wspr.py"
+for module in wspr.py command.py; do
+    install -m 0644 "$SRC_DIR/$module" "$APP_DIR/$module"
+    echo "Installed app    -> $APP_DIR/$module"
+done
 
 # launcher executable -------------------------------------------------------
 # The loop puts the pip-installed CUDA 12 cuBLAS/cuDNN wheels (if present) on
