@@ -52,10 +52,16 @@ command -v notify-send >/dev/null 2>&1 \
     || echo "WARNING: notify-send not found - install libnotify for desktop notifications."
 
 # application code ----------------------------------------------------------
-for module in wspr.py daemon.py command.py; do
+for module in wspr.py daemon.py; do
     install -m 0644 "$SRC_DIR/$module" "$APP_DIR/$module"
     echo "Installed app    -> $APP_DIR/$module"
 done
+
+# wspr-i3 command plugin (unconditional until the --with-i3 installer
+# split lands).
+mkdir -p "$APP_DIR/wspr_i3"
+install -m 0644 "$SRC_DIR"/wspr_i3/*.py "$APP_DIR/wspr_i3/"
+echo "Installed plugin -> $APP_DIR/wspr_i3/"
 
 # launcher executable -------------------------------------------------------
 # The loop puts the pip-installed CUDA 12 cuBLAS/cuDNN wheels (if present) on

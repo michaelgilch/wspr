@@ -1,15 +1,25 @@
 """wspr - push-to-talk voice tool.
 
-Thin entry point: argument parsing, config loading, and dispatch. Imports
-here are stdlib-only so subcommands start fast; the daemon's heavy imports
-(numpy, sounddevice, faster-whisper, Xlib) live in daemon.py and load only
-for the bare `wspr` invocation.
+Usage:
+    wspr                    run the push-to-talk daemon
+    wspr COMMAND [ARG...]   forwarded to the command plugin named by [command]
+                            in wspr.toml
+
+Thin entry point: config loading, plugin loading, and dispatch. Imports here
+are stdlib-only so subcommands start fast; the daemon's heavy imports (numpy,
+sounddevice, faster-whisper, Xlib) live in daemon.py and load only for the
+bare `wspr` invocation.
 """
 
-import argparse
+import importlib
 import os
+import sys
 import tomllib
 from pathlib import Path
+
+# Out-of-repo plugins live here; the app directory itself (this file's
+# directory) is already on sys.path as the script directory.
+PLUGIN_DIR = Path.home() / ".local" / "share" / "wspr" / "plugins"
 
 
 def find_config_path() -> Path | None:
@@ -41,25 +51,39 @@ def load_config() -> dict:
     return cfg
 
 
-def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(
-        prog="wspr",
-        description="Push-to-talk dictation daemon. Run with no arguments.")
-    sub = parser.add_subparsers(dest="cmd")
-    p_exec = sub.add_parser(
-        "exec", help="route one transcript through the command sink and execute it")
-    p_exec.add_argument("text", nargs="+", help="the transcript to route")
-    return parser.parse_args()
+def load_plugin(cfg: dict):
+    """Import and return the command plugin named by [command] module.
+
+    Exits when no module is configured or the import fails.
+    """
+    name = cfg.get("command", {}).get("module")
+    if not name:
+        sys.exit('No command plugin configured: set module = "..." under '
+                 "[command] in wspr.toml (the i3 plugin ships as wspr_i3).")
+    if PLUGIN_DIR.is_dir() and str(PLUGIN_DIR) not in sys.path:
+        sys.path.append(str(PLUGIN_DIR))
+    try:
+        return importlib.import_module(name)
+    except ImportError as e:
+        sys.exit(f"Command plugin {name!r} failed to import ({e}): "
+                 "Check module under [command] in wspr.toml, or reinstall.")
 
 
 def main() -> None:
-    args = parse_args()
-    if args.cmd == "exec":
-        import command
-        command.handle(" ".join(args.text), load_config())
+    argv = sys.argv[1:]
+    if not argv:
+        import daemon
+        daemon.run(load_config())
         return
-    import daemon
-    daemon.run(load_config())
+    if argv[0] in ("-h", "--help"):
+        print(__doc__.strip())
+        return
+    # Every subcommand belongs to the plugin; core stays verb-agnostic.
+    cfg = load_config()
+    plugin = load_plugin(cfg)
+    if not hasattr(plugin, "cli"):
+        sys.exit(f"Command plugin {plugin.__name__!r} provides no cli().")
+    sys.exit(plugin.cli(argv, cfg))
 
 
 if __name__ == "__main__":

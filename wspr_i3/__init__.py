@@ -1,8 +1,12 @@
-"""Voice-command routing for wspr's command sink.
+"""wspr-i3: voice-command plugin for wspr.
 
 Routes a command transcript through a local LLM (Ollama) onto a whitelisted
-action, validates, and executes. Absorbed from hark
+i3 action, validates, and executes. Loaded by wspr through the plugin seam
+(module = "wspr_i3" under [command] in wspr.toml). Absorbed from hark
 (github.com/michaelgilch/hark).
+
+Verbs:
+    exec TEXT...    route one transcript and execute it
 """
 
 import json
@@ -158,3 +162,17 @@ def handle(text: str, cfg: dict) -> None:
             return
         print(f"  done: {result}")
         notify("wspr ▸ " + text, result)
+
+
+# --- wspr CLI surface -------------------------------------------------------
+
+def cli(argv: list[str], cfg: dict) -> int:
+    """ Dispatch a wspr subcommand (argv is sys.argv[1:] from the wspr CLI).
+    Returns a process exit code. """
+    cmd, *rest = argv
+    text = " ".join(rest).strip()
+    if cmd == "exec" and text:
+        handle(text, cfg)
+        return 0
+    print(__doc__.strip(), file=sys.stderr)
+    return 1

@@ -205,14 +205,14 @@ def sink_socket(text: str, path: str) -> None:
         notify("socket sink failed: is the listener running?")
 
 
-def emit(text: str, binding: Binding, cfg: dict) -> None:
+def emit(text: str, binding: Binding, cfg: dict, plugin=None) -> None:
     """Route a transcript to whichever sink its binding selects."""
     if binding.sink == "socket":
         sink_socket(text, binding.socket_path)
     elif binding.sink == "command":
-        # Imported on first use so dictation-only configs never load it.
-        import command
-        command.handle(text, cfg)
+        # run() loads the plugin at startup whenever a command binding
+        # exists, so it cannot be None here.
+        plugin.handle(text, cfg)
     else:
         sink_type(text)
 
@@ -271,6 +271,17 @@ def run(cfg: dict) -> None:
     if not bindings:
         # For no config or no hotkey definitions in config, use default
         bindings = [parse_hotkey("super+space", disp)]
+
+    # A command binding routes through the plugin named in config. Load it
+    # (and let it prepare) before grabbing any keys, so a broken command
+    # setup fails loudly at startup instead of on the first utterance.
+    # Dictation-only configs never trigger the import.
+    plugin = None
+    if any(b.sink == "command" for b in bindings):
+        import wspr
+        plugin = wspr.load_plugin(cfg)
+        if hasattr(plugin, "prepare"):
+            plugin.prepare(cfg)
 
     # Grabbing keys in X is weird!
     # X returns keygrabs asynchronously, so it may take a while, and cause issues
@@ -351,7 +362,7 @@ def run(cfg: dict) -> None:
         text = " ".join(seg.text.strip() for seg in segments).strip()
         if text:
             print(f"  -> {text!r}")
-            emit(text, binding, cfg)
+            emit(text, binding, cfg, plugin)
         else:
             print("  (no speech detected)")
 

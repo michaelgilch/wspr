@@ -5,8 +5,9 @@
 #   type    - typed into the focused window via xdotool
 #   socket  - sent over a Unix socket; optional `socket` key overrides
 #             the default $XDG_RUNTIME_DIR/wspr.sock
-#   command - routed through a local LLM (Ollama) onto a whitelisted
-#             i3 action and executed (see [ollama])
+#   command - handed to the command plugin named under [command], which
+#             routes it through a local LLM (Ollama) onto a whitelisted
+#             action and executes it (see [command], [ollama])
 
 [[hotkeys]]
 combo = "super+space"
@@ -22,6 +23,13 @@ sink = "command"
 #combo = "super+shift+d"
 #sink = "socket"
 #socket = "$XDG_RUNTIME_DIR/wspr.sock"
+
+# [command] names the plugin module that handles `command` bindings and
+# provides wspr's subcommands. It must be importable from the app
+# directory or ~/.local/share/wspr/plugins. wspr-i3, the i3 plugin,
+# ships in this repo as wspr_i3/.
+[command]
+module = "wspr_i3"
 
 # [model] is the speech-to-text stage: the local faster-whisper model that
 # turns recorded audio into a transcript. Every binding uses it, no matter
