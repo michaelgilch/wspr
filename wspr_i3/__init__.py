@@ -10,10 +10,11 @@ Verbs:
 """
 
 import json
-import subprocess
 import sys
 import threading
 import urllib.request
+
+from . import actions
 
 # Any key the code reads from cfg["ollama"] must have a default here, so the
 # command sink works with no [ollama] section at all; wspr.toml will only
@@ -29,33 +30,6 @@ DEFAULTS = {
 # transcripts strictly one at a time; this lock preserves that, so two
 # in-flight utterances can't land i3 commands out of order.
 _lock = threading.Lock()
-
-
-# --- Helpers ----------------------------------------------------------------
-
-def i3msg(*cmds: str) -> None:
-    """ Send one or more commands to i3 in a single i3-msg call """
-    subprocess.run(["i3-msg", "; ".join(cmds)], check=False,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
-
-def notify(summary: str, body: str = "") -> None:
-    """ Desktop notification """
-    subprocess.run(["notify-send", summary, body], check=False)
-
-
-# --- Actions ---------------------------------------------------------------
-
-def switch_workspace(n: int) -> str:
-    i3msg(f"workspace number {n}")
-    return f"workspace {n}"
-
-
-# The whitelist: the only things the command sink can do.
-# The LLM picks by name. validate() decides whether the pick may run.
-ACTIONS = {
-    "switch_workspace": switch_workspace,
-}
 
 
 # --- Routing ---------------------------------------------------------------
@@ -140,28 +114,28 @@ def handle(text: str, cfg: dict) -> None:
             reply = route_llm(text, cfg)
         except Exception as e:
             print(f"  routing failed: {e}", file=sys.stderr)
-            notify("wspr ▸ " + text, "routing failed (is Ollama up?)")
+            actions.notify("wspr ▸ " + text, "routing failed (is Ollama up?)")
             return
         print(f"  llm: {reply}")
         try:
             routed = validate(reply)
         except ValueError as e:
             print(f"  refused: {e}")
-            notify("wspr ▸ " + text, f"refused: {e}")
+            actions.notify("wspr ▸ " + text, f"refused: {e}")
             return
         if routed is None:
             print("  no matching command")
-            notify("wspr ▸ " + text, "no matching command")
+            actions.notify("wspr ▸ " + text, "no matching command")
             return
         name, args = routed
         try:
-            result = ACTIONS[name](**args)
+            result = actions.ACTIONS[name](**args)
         except Exception as e:
             print(f"  action failed: {e}", file=sys.stderr)
-            notify("wspr", f"{name} failed: {e}")
+            actions.notify("wspr", f"{name} failed: {e}")
             return
         print(f"  done: {result}")
-        notify("wspr ▸ " + text, result)
+        actions.notify("wspr ▸ " + text, result)
 
 
 # --- wspr CLI surface -------------------------------------------------------
