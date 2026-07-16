@@ -1,5 +1,6 @@
 [Unit]
-Description=wspr push-to-talk voice dictation
+Description=wspr push-to-talk dictation and voice commands
+After=graphical-session.target
 
 [Service]
 # stdout is a journald pipe, not a tty. 

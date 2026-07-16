@@ -123,7 +123,7 @@ combo = "super+space"
 sink = "type"
 
 [[hotkeys]]
-combo = "super+shift+d"
+combo = "super+ctrl+space"
 sink = "command"
 
 [command]

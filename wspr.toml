@@ -13,12 +13,15 @@
 combo = "super+space"
 sink = "type"
 
-[[hotkeys]]
-combo = "super+shift+d"
-sink = "command"
+# Example command binding - needs the wspr-i3 plugin (./install.sh --with-i3).
+# Uncomment it and [command] below to enable. The [[hotkeys]] header must be
+# uncommented too: a bare header with no keys is an empty entry, which fails
+# at startup.
+#[[hotkeys]]
+#combo = "super+ctrl+space"
+#sink = "command"
 
-# Example socket binding. The [[hotkeys]] header must be commented out too:
-# a bare header with no keys is an empty entry, which fails at startup.
+# Example socket binding.
 #[[hotkeys]]
 #combo = "super+shift+d"
 #sink = "socket"
@@ -28,8 +31,8 @@ sink = "command"
 # provides wspr's subcommands. It must be importable from the app
 # directory or ~/.local/share/wspr/plugins. wspr-i3, the i3 plugin,
 # ships in this repo as wspr_i3/.
-[command]
-module = "wspr_i3"
+#[command]
+#module = "wspr_i3"
 
 # [model] is the speech-to-text stage: the local faster-whisper model that
 # turns recorded audio into a transcript. Every binding uses it, no matter
@@ -42,7 +45,7 @@ compute_type = "int8"  # int8 (CPU), float16 (GPU)
 # [ollama] is the routing stage, used only by `command` bindings: the
 # transcript goes to this local Ollama model, which maps it onto the action
 # whitelist (or rejects it). Dictation never touches Ollama.
-[ollama]
+#[ollama]
 # url = "http://localhost:11434"
 # model = "gemma3:1b"
 # timeout = 30         # seconds to wait for a routing reply

@@ -3,20 +3,66 @@
 #   app + venv  -> ~/.local/share/wspr/         (code and a private venv)
 #   executable  -> ~/.local/bin/wspr            (launcher into that venv)
 #   config      -> ~/.config/wspr/wspr.toml     (created only if absent)
-#   unit        -> ~/.config/systemd/user/wspr.service  (systemd user service)
+#   service     -> ~/.config/systemd/user/wspr.service  (systemd user service)
 #
-# Safe to re-run: it upgrades code/deps and the unit, but never overwrites an
-# existing config.
+# Usage:
+#   ./install.sh              core install/upgrade (refreshes wspr-i3 if installed)
+#   ./install.sh --with-i3    additionally install the wspr-i3 command plugin
+#   ./install.sh --remove-i3  remove the plugin (core install/upgrade still runs)
+#   ./install.sh --uninstall  stop the service and remove app, venv, launcher,
+#                             and service file; the config is left in place
+#
+# Safe to re-run. It upgrades code/deps and the service, but never overwrites an
+# existing config. An installed plugin is refreshed on every re-run so core
+# and plugin never skew; only --remove-i3 removes it.
 
 set -euo pipefail
 
 SRC_DIR="$(cd "$(dirname "$0")" && pwd)"
+
+WITH_I3=0
+REMOVE_I3=0
+UNINSTALL=0
+for arg in "$@"; do
+    case "$arg" in
+        --with-i3)   WITH_I3=1 ;;
+        --remove-i3) REMOVE_I3=1 ;;
+        --uninstall) UNINSTALL=1 ;;
+        *) echo "Unknown option: $arg" >&2
+           echo "Usage: $0 [--with-i3 | --remove-i3 | --uninstall]" >&2
+           exit 2 ;;
+    esac
+done
+if [ $((WITH_I3 + REMOVE_I3 + UNINSTALL)) -gt 1 ]; then
+    echo "ERROR: --with-i3, --remove-i3, and --uninstall are mutually exclusive." >&2
+    exit 2
+fi
 
 BIN_DIR="$HOME/.local/bin"
 APP_DIR="$HOME/.local/share/wspr"
 CONFIG_DIR="$HOME/.config/wspr"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 VENV="$APP_DIR/venv"
+
+# uninstall ------------------------------------------------------------------
+# Undoes everything the installer creates except the config, which carries
+# user customizations and should survive a reinstall; delete
+# ~/.config/wspr/wspr.toml manually for a fully clean slate. The whisper model
+# cache (~/.cache/huggingface) is shared with other tools and never touched.
+if [ "$UNINSTALL" -eq 1 ]; then
+    systemctl --user stop wspr.service 2>/dev/null || true
+    rm -rf "$APP_DIR"
+    echo "Removed app      -> $APP_DIR/"
+    rm -f "$BIN_DIR/wspr"
+    echo "Removed bin      -> $BIN_DIR/wspr"
+    if [ -e "$SYSTEMD_DIR/wspr.service" ]; then
+        rm -f "$SYSTEMD_DIR/wspr.service"
+        systemctl --user daemon-reload
+        echo "Removed service  -> $SYSTEMD_DIR/wspr.service"
+    fi
+    echo "Config left at $CONFIG_DIR/wspr.toml - delete it manually for a fully clean slate."
+    exit 0
+fi
 
 mkdir -p "$BIN_DIR" "$APP_DIR" "$CONFIG_DIR" "$SYSTEMD_DIR"
 
@@ -57,11 +103,36 @@ for module in wspr.py daemon.py; do
     echo "Installed app    -> $APP_DIR/$module"
 done
 
-# wspr-i3 command plugin (unconditional until the --with-i3 installer
-# split lands).
-mkdir -p "$APP_DIR/wspr_i3"
-install -m 0644 "$SRC_DIR"/wspr_i3/*.py "$APP_DIR/wspr_i3/"
-echo "Installed plugin -> $APP_DIR/wspr_i3/"
+# wspr-i3 command plugin -----------------------------------------------------
+# Installed only on --with-i3, then sticky: a plain re-run refreshes an
+# installed plugin so core and plugin never skew. Removed only by --remove-i3.
+# Refresh is remove-and-recopy so renamed/dropped plugin files leave no stale
+# modules behind.
+if [ "$REMOVE_I3" -eq 1 ]; then
+    if [ -d "$APP_DIR/wspr_i3" ]; then
+        rm -rf "$APP_DIR/wspr_i3"
+        echo "Removed plugin   -> $APP_DIR/wspr_i3/"
+    else
+        echo "Plugin wspr-i3 is not installed; nothing to remove."
+    fi
+elif [ "$WITH_I3" -eq 1 ] || [ -d "$APP_DIR/wspr_i3" ]; then
+    [ "$WITH_I3" -eq 1 ] || echo "Refreshing installed wspr-i3 plugin (remove with --remove-i3)."
+    rm -rf "$APP_DIR/wspr_i3"
+    mkdir -p "$APP_DIR/wspr_i3"
+    install -m 0644 "$SRC_DIR"/wspr_i3/*.py "$APP_DIR/wspr_i3/"
+    echo "Installed plugin -> $APP_DIR/wspr_i3/"
+
+    # Plugin runtime deps: absent ones don't stop the install, but command
+    # routing (Ollama) and i3 control (i3-msg) need them.
+    command -v i3-msg >/dev/null 2>&1 \
+        || echo "WARNING: i3-msg not found - the plugin controls i3 through it."
+    if command -v curl >/dev/null 2>&1; then
+        curl -fsS --max-time 2 "http://localhost:11434/" >/dev/null 2>&1 \
+            || echo "WARNING: Ollama not reachable at http://localhost:11434 - command routing needs it ([ollama] url in wspr.toml)."
+    else
+        echo "NOTE: curl not found - skipped the Ollama reachability check."
+    fi
+fi
 
 # launcher executable -------------------------------------------------------
 # The loop puts the pip-installed CUDA 12 cuBLAS/cuDNN wheels (if present) on
