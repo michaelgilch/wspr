@@ -32,7 +32,7 @@ For plain dictation, I probably wouldn't. Plenty of tools already exist. However
 - **System tools:**
   - `xdotool` - types transcripts into the focused window (the `type` sink)
   - `notify-send` (libnotify) - desktop notifications
-- **For the command sink** (wspr-i3 plugin only; dictation works without these):
+- **For the command sink** (the wspr-i3 plugin, installed via `./install.sh --with-i3`; dictation works without these):
   - **i3** - actions execute through `i3-msg`
   - **Ollama** running locally with the configured routing model (default `gemma3:1b`)
 
@@ -43,26 +43,32 @@ For plain dictation, I probably wouldn't. Plenty of tools already exist. However
 The recommended way to install wspr for everyday use is `install.sh`:
 
 ```sh
-./install.sh
+./install.sh              # dictation-only core
+./install.sh --with-i3    # core + the wspr-i3 voice-command plugin
+./install.sh --remove-i3  # drop the plugin, keep the core
+./install.sh --uninstall  # remove everything except your config
 ```
 
 It sets everything up under your home directory (no root needed):
 
-| What                | Where                                       |
-|:--------------------|:--------------------------------------------|
-| App + private venv  | `~/.local/share/wspr/`                      |
-| wspr-i3 plugin      | `~/.local/share/wspr/wspr_i3/`              |
-| Launcher executable | `~/.local/bin/wspr`                         |
-| Default config      | `~/.config/wspr/wspr.toml` (only if absent) |
-| systemd user unit   | `~/.config/systemd/user/wspr.service`       |
+| What                         | Where                                       |
+|:-----------------------------|:--------------------------------------------|
+| App + private venv           | `~/.local/share/wspr/`                      |
+| wspr-i3 plugin (`--with-i3`) | `~/.local/share/wspr/wspr_i3/`              |
+| Launcher executable          | `~/.local/bin/wspr`                         |
+| Default config               | `~/.config/wspr/wspr.toml` (only if absent) |
+| systemd user service         | `~/.config/systemd/user/wspr.service`       |
 
 It creates the venv, installs the dependencies from `requirements.txt`, and (if
 `nvidia-smi` is present) adds the CUDA cuBLAS/cuDNN wheels for `device = "cuda"`.
-The installer is safe to re-run: it upgrades the code, dependencies, and unit,
-but never overwrites an existing config. If you're already in a graphical
-session it (re)starts the service immediately.
+The installer is safe to re-run: it upgrades the code, dependencies, and
+service, and refreshes an installed plugin so core and plugin never skew. It
+never overwrites an existing config. The plugin is sticky: only an explicit
+`--remove-i3` removes it, and `--uninstall` keeps your config for the next
+install. If you're already in a graphical session it (re)starts the service
+immediately.
 
-The unit is deliberately **not enabled**: wspr needs the session's
+The service is deliberately **not enabled**: wspr needs the session's
 `DISPLAY`/`XAUTHORITY`, which don't exist until X starts, so systemd must not
 launch it at boot. Instead, have your window manager start it once the session
 is up. For i3:
@@ -105,34 +111,42 @@ Core owns no subcommands; the vocabulary belongs to the configured plugin.
 With wspr-i3 that is currently:
 
 ```sh
-wspr exec switch to workspace three   # route one transcript and execute it
+wspr route switch to workspace three   # dry run: print the routed action, execute nothing
+wspr exec switch to workspace three    # route one transcript and execute it
 ```
 
-`exec` is handy for testing routing without speaking. `wspr -h` prints usage;
-an unrecognized command prints the plugin's own usage.
+`route` shows what the router decided without side effects; `exec` is the
+same pipeline and actually executes. `wspr -h` prints usage; an unrecognized
+command prints the plugin's own usage.
 
 ## Configuration
 
 wspr reads the first `wspr.toml` found in: `$WSPR_CONFIG`, the app directory,
 `~/.config/wspr/wspr.toml`. Each `[[hotkeys]]` entry is one push-to-talk
-binding. The shipped default:
+binding. The shipped default is dictation-only:
 
 ```toml
 [[hotkeys]]
 combo = "super+space"
 sink = "type"
 
+[model]
+size = "base.en"       # tiny.en, base.en, small.en, medium, large-v3
+device = "cpu"         # cpu, cuda
+compute_type = "int8"  # int8 (CPU), float16 (GPU)
+```
+
+To enable voice commands, install the plugin (`./install.sh --with-i3`) and
+uncomment the command binding and `[command]` section that the shipped config
+carries:
+
+```toml
 [[hotkeys]]
 combo = "super+ctrl+space"
 sink = "command"
 
 [command]
 module = "wspr_i3"     # the plugin that handles command bindings
-
-[model]
-size = "base.en"       # tiny.en, base.en, small.en, medium, large-v3
-device = "cpu"         # cpu, cuda
-compute_type = "int8"  # int8 (CPU), float16 (GPU)
 ```
 
 `[model]` is the speech-to-text stage, used by every binding. `[ollama]`
