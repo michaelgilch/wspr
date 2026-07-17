@@ -30,25 +30,24 @@ def handle(text: str, cfg: dict, dry_run: bool = False) -> None:
             return
         print(f"  llm: {reply}")
         try:
-            routed = router.validate(reply)
+            intent = router.validate(reply)
         except ValueError as e:
             print(f"  refused: {e}")
             notify("wspr ▸ " + text, f"refused: {e}")
             return
-        if routed is None:
+        if intent is None:
             print("  no matching command")
             notify("wspr ▸ " + text, "no matching command")
             return
-        name, args = routed
+        intent.heard = text
         if dry_run:
-            pretty = ", ".join(f"{k}={v}" for k, v in args.items())
-            print(f"  dry run: would execute {name}({pretty})")
+            print(f"  dry run: would execute {intent.describe()}")
             return
         try:
-            result = actions.ACTIONS[name](**args)
+            result = actions.ACTIONS[intent.name](**intent.args)
         except Exception as e:
             print(f"  action failed: {e}", file=sys.stderr)
-            notify("wspr", f"{name} failed: {e}")
+            notify("wspr", f"{intent.name} failed: {e}")
             return
         print(f"  done: {result}")
         notify("wspr ▸ " + text, result)

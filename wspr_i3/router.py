@@ -3,6 +3,7 @@
 
 import json
 import urllib.request
+from dataclasses import dataclass, field
 
 # Any key the code reads from cfg["ollama"] must have a default here, so the
 # command sink works with no [ollama] section at all; wspr.toml will only
@@ -13,6 +14,21 @@ DEFAULTS = {
     "timeout": 30,        # seconds to wait for a routing reply
     "keep_alive": "30m",  # how long Ollama keeps the model warm
 }
+
+
+@dataclass
+class Intent:
+    """ The currency between routing and execution: everything that needs to
+    reason about "a command about to run" (the confirm gate, dry runs,
+    logging) works on this one object. """
+    name: str
+    args: dict = field(default_factory=dict)
+    heard: str = ""
+
+    def describe(self) -> str:
+        args = ", ".join(f"{k}={v}" for k, v in self.args.items())
+        return f"{self.name}({args})"
+
 
 SYSTEM = """\
 You convert voice-command transcripts into JSON for an i3 window manager \
@@ -70,10 +86,10 @@ def route_llm(text: str, cfg: dict) -> dict:
     return json.loads(reply["message"]["content"])
 
 
-def validate(reply: dict) -> tuple[str, dict] | None:
-    """ Only a whitelisted action with validated args gets out.
-    Returns (name, args) to run, or None for a deliberate "none".
-    Raises ValueError on anything malformed: refused, never coerced. """
+def validate(reply: dict) -> Intent | None:
+    """ The trust boundary: only a whitelisted action with validated args
+    becomes an Intent. Returns None for a deliberate "none". Raises
+    ValueError on anything malformed: refused, never coerced. """
     action = reply.get("action")
     if action == "none":
         return None
@@ -83,5 +99,5 @@ def validate(reply: dict) -> tuple[str, dict] | None:
             raise ValueError("switch_workspace without a workspace number")
         if not 1 <= n <= 10:
             raise ValueError(f"workspace {n} out of range 1-10")
-        return "switch_workspace", {"n": n}
+        return Intent("switch_workspace", {"n": n})
     raise ValueError(f"unknown action {action!r}")
