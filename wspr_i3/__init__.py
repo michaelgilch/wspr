@@ -40,8 +40,9 @@ def handle(text: str, cfg: dict, dry_run: bool = False) -> None:
             notify("wspr ▸ " + text, "no matching command")
             return
         intent.heard = text
+        print(f"  intent: {intent.describe()}  [confidence={intent.confidence:.2f}]")
         if dry_run:
-            print(f"  dry run: would execute {intent.describe()}")
+            print("  dry run: not executing")
             return
         try:
             result = actions.ACTIONS[intent.name](**intent.args)
