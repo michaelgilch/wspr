@@ -50,3 +50,12 @@ compute_type = "int8"  # int8 (CPU), float16 (GPU)
 # model = "gemma3:1b"
 # timeout = 30         # seconds to wait for a routing reply
 # keep_alive = "30m"   # how long Ollama keeps the model warm after a request
+# confidence_threshold = 0.7   # below this, 'uncertain' mode asks first
+
+# [confirm] controls when a routed command asks (rofi yes/no) before
+# executing. Privileged actions (system updates) ALWAYS confirm.
+#   always    - confirm every command
+#   uncertain - confirm privileged actions and shaky routings (the default)
+#   never     - confirm only privileged actions
+#[confirm]
+# mode = "uncertain"

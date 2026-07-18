@@ -18,6 +18,21 @@ from . import actions, router
 _lock = threading.Lock()
 
 
+def needs_confirm(intent: router.Intent, cfg: dict) -> bool:
+    # Config defaults are read locally here until prepare() formalizes
+    # merging at daemon startup.
+    if intent.privileged:
+        return True                       # privileged ALWAYS confirms
+    mode = cfg.get("confirm", {}).get("mode", "uncertain")
+    if mode == "always":
+        return True
+    if mode == "never":
+        return False
+    # 'uncertain': ask when the routing itself was shaky
+    threshold = {**router.DEFAULTS, **cfg.get("ollama", {})}["confidence_threshold"]
+    return intent.uncertain or intent.confidence < threshold
+
+
 def handle(text: str, cfg: dict, dry_run: bool = False) -> None:
     with _lock:
         notify = (lambda *a: None) if dry_run else actions.notify
@@ -40,9 +55,15 @@ def handle(text: str, cfg: dict, dry_run: bool = False) -> None:
             notify("wspr ▸ " + text, "no matching command")
             return
         intent.heard = text
-        print(f"  intent: {intent.describe()}  [confidence={intent.confidence:.2f}]")
+        print(f"  intent: {intent.describe()}  [privileged={intent.privileged} "
+              f"confidence={intent.confidence:.2f} "
+              f"confirm={needs_confirm(intent, cfg)}]")
         if dry_run:
             print("  dry run: not executing")
+            return
+        if needs_confirm(intent, cfg) and not actions.confirm(f"{intent.describe()}?"):
+            print("  cancelled")
+            notify("wspr", "cancelled")
             return
         try:
             result = actions.ACTIONS[intent.name](**intent.args)

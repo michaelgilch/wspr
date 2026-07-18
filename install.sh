@@ -123,7 +123,11 @@ elif [ "$WITH_I3" -eq 1 ] || [ -d "$APP_DIR/wspr_i3" ]; then
     echo "Installed plugin -> $APP_DIR/wspr_i3/"
 
     # Plugin runtime deps: absent ones don't stop the install, but command
-    # routing (Ollama) and i3 control (i3-msg) need them.
+    # routing (Ollama), confirmations (rofi), and i3 control (i3-msg) need
+    # them. The confirm gate fails closed without rofi: privileged commands
+    # become impossible to approve.
+    command -v rofi >/dev/null 2>&1 \
+        || echo "WARNING: rofi not found - command confirmations need it and fail closed without it."
     command -v i3-msg >/dev/null 2>&1 \
         || echo "WARNING: i3-msg not found - the plugin controls i3 through it."
     if command -v curl >/dev/null 2>&1; then

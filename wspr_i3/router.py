@@ -5,6 +5,8 @@ import json
 import urllib.request
 from dataclasses import dataclass, field
 
+from . import actions
+
 # Any key the code reads from cfg["ollama"] must have a default here, so the
 # command sink works with no [ollama] section at all; wspr.toml will only
 # name what it overrides.
@@ -13,6 +15,7 @@ DEFAULTS = {
     "model": "gemma3:1b",
     "timeout": 30,        # seconds to wait for a routing reply
     "keep_alive": "30m",  # how long Ollama keeps the model warm
+    "confidence_threshold": 0.7,  # below this, 'uncertain' mode asks first
 }
 
 
@@ -23,7 +26,9 @@ class Intent:
     logging) works on this one object. """
     name: str
     args: dict = field(default_factory=dict)
+    privileged: bool = False    # confirms in every mode
     confidence: float = 1.0     # the model's own certainty, clamped to [0,1]
+    uncertain: bool = False     # fuzzy resolution -> confirm in 'uncertain' mode
     heard: str = ""
 
     def describe(self) -> str:
@@ -32,20 +37,28 @@ class Intent:
 
 
 SYSTEM = """\
-You convert voice-command transcripts into JSON for an i3 window manager \
-controller. The only available action is switch_workspace, which takes n, \
-a workspace number from 1 to 10.
+You convert voice-command transcripts into JSON actions for an i3 window \
+manager controller.
 
-If the transcript asks to switch, go to, or move to a workspace, reply with \
-{"action": "switch_workspace", "n": <number>, "confidence": <0.0-1.0>}. For \
-anything else, including other desktop commands and workspace numbers \
-outside 1-10, reply with {"action": "none", "confidence": <0.0-1.0>}.
-confidence is how sure you are that this is what the user meant.
+Actions:
+  switch_workspace: args {"n": integer 1-10} - focus i3 workspace number n
+  lock_screen: no args - lock the screen
+  run_updates: no args - open the interactive system update window
+  none: no args - the request does not map to any available action
+
+Rules:
+- Reply with ONLY one JSON object: {"action": <name>, "n": <integer, \
+switch_workspace only>, "confidence": <0.0-1.0>}
+- confidence is how sure you are that this is what the user meant.
+- Use action "none" for anything else, including workspace numbers \
+outside 1-10.
 
 Examples:
 "Switch to workspace two." -> {"action": "switch_workspace", "n": 2, "confidence": 0.98}
 "go to the ninth workspace" -> {"action": "switch_workspace", "n": 9, "confidence": 0.95}
-"lock the screen" -> {"action": "none", "confidence": 0.9}
+"please lock my computer" -> {"action": "lock_screen", "confidence": 0.95}
+"run updates" -> {"action": "run_updates", "confidence": 0.97}
+"update the system" -> {"action": "run_updates", "confidence": 0.9}
 "open a terminal" -> {"action": "none", "confidence": 0.9}
 "switch to workspace fifty" -> {"action": "none", "confidence": 0.85}
 "workspace" -> {"action": "none", "confidence": 0.6}
@@ -69,7 +82,8 @@ SCHEMA = {
                         "confidence": {"type": "number"}},
          "required": ["action", "n", "confidence"]},
         {"type": "object",
-         "properties": {"action": {"const": "none"},
+         "properties": {"action": {"enum": ["lock_screen", "run_updates",
+                                            "none"]},
                         "confidence": {"type": "number"}},
          "required": ["action", "confidence"]},
     ],
@@ -120,4 +134,7 @@ def validate(reply: dict) -> Intent | None:
         if not 1 <= n <= 10:
             raise ValueError(f"workspace {n} out of range 1-10")
         return Intent("switch_workspace", {"n": n}, confidence=confidence)
+    if action in ("lock_screen", "run_updates"):
+        return Intent(action, {}, privileged=action in actions.PRIVILEGED,
+                      confidence=confidence)
     raise ValueError(f"unknown action {action!r}")
