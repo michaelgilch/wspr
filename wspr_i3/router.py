@@ -6,6 +6,7 @@ import urllib.request
 from dataclasses import dataclass, field
 
 from . import actions
+from .context import Context
 
 # Any key the code reads from cfg["ollama"] must have a default here, so the
 # command sink works with no [ollama] section at all; wspr.toml will only
@@ -36,41 +37,57 @@ class Intent:
         return f"{self.name}({args})"
 
 
-SYSTEM = """\
-You convert voice-command transcripts into JSON actions for an i3 window \
-manager controller.
+def render_system_prompt(ctx: Context) -> str:
+    """ The model's briefing, grounded in this machine: its workspaces, its
+    curated aliases, its declared packages. What lets a small local model
+    act like it knows your computer: it chooses from your vocabulary. """
+    ws = ", ".join(f'{n}: "{name}"' for n, name in sorted(ctx.workspaces.items()))
+    aliases = ", ".join(f"{a} -> {c}" for a, c in sorted(ctx.launch_map.items()))
+    pkgs = ", ".join(sorted(ctx.packages))
+    return f"""\
+You convert voice-command transcripts into JSON actions for this specific \
+machine.
+
+Machine: {ctx.host}, Arch Linux, i3 window manager.
+i3 workspaces: {ws}
+Application aliases: {aliases}
+Installed packages: {pkgs}
 
 Actions:
-  switch_workspace: args {"n": integer 1-10} - focus i3 workspace number n
+  switch_workspace: args {{"n": integer 1-10}} - focus i3 workspace number n
+  launch_app: args {{"app": application name}} - open an application
   lock_screen: no args - lock the screen
   run_updates: no args - open the interactive system update window
   none: no args - the request does not map to any available action
 
 Rules:
-- Reply with ONLY one JSON object: {"action": <name>, "n": <integer, \
-switch_workspace only>, "confidence": <0.0-1.0>}
+- Reply with ONLY one JSON object: {{"action": <name>, "n": <integer, \
+switch_workspace only>, "app": <string, launch_app only>, \
+"confidence": <0.0-1.0>}}
 - confidence is how sure you are that this is what the user meant.
+- For launch_app, "app" is the application the user means; prefer a name \
+from the alias or package lists above when one fits.
 - Use action "none" for anything else, including workspace numbers \
 outside 1-10.
 
 Examples:
-"Switch to workspace two." -> {"action": "switch_workspace", "n": 2, "confidence": 0.98}
-"go to the ninth workspace" -> {"action": "switch_workspace", "n": 9, "confidence": 0.95}
-"please lock my computer" -> {"action": "lock_screen", "confidence": 0.95}
-"run updates" -> {"action": "run_updates", "confidence": 0.97}
-"update the system" -> {"action": "run_updates", "confidence": 0.9}
-"open a terminal" -> {"action": "none", "confidence": 0.9}
-"switch to workspace fifty" -> {"action": "none", "confidence": 0.85}
-"workspace" -> {"action": "none", "confidence": 0.6}
-"close workspace two" -> {"action": "none", "confidence": 0.7}
+"Switch to workspace two." -> {{"action": "switch_workspace", "n": 2, "confidence": 0.98}}
+"go to the ninth workspace" -> {{"action": "switch_workspace", "n": 9, "confidence": 0.95}}
+"open a terminal" -> {{"action": "launch_app", "app": "terminal", "confidence": 0.97}}
+"fire up the browser" -> {{"action": "launch_app", "app": "browser", "confidence": 0.9}}
+"please lock my computer" -> {{"action": "lock_screen", "confidence": 0.95}}
+"run updates" -> {{"action": "run_updates", "confidence": 0.97}}
+"switch to workspace fifty" -> {{"action": "none", "confidence": 0.85}}
+"workspace" -> {{"action": "none", "confidence": 0.6}}
+"close workspace two" -> {{"action": "none", "confidence": 0.7}}
 
 Transcripts come from speech recognition and may contain extra punctuation, \
 capitalization, or filler words."""
 
 # Constrained decode. The model can only emit tokens that fit this schema.
 # One branch per action shape: a flat schema can't make "n" required for
-# switch_workspace but absent for none, and with "n" merely optional the
-# model happily omits it ("go to workspace four" -> no n at all).
+# switch_workspace but absent for lock_screen, and with "n" merely optional
+# the model happily omits it ("go to workspace four" -> no n at all).
 # Structure only, no min/max on n: a range constraint would truncate an
 # out-of-range answer into a valid-looking one ("eleven" -> 1). The 1-10
 # range is validate()'s job, where a violation is refused, not mangled.
@@ -82,6 +99,11 @@ SCHEMA = {
                         "confidence": {"type": "number"}},
          "required": ["action", "n", "confidence"]},
         {"type": "object",
+         "properties": {"action": {"const": "launch_app"},
+                        "app": {"type": "string"},
+                        "confidence": {"type": "number"}},
+         "required": ["action", "app", "confidence"]},
+        {"type": "object",
          "properties": {"action": {"enum": ["lock_screen", "run_updates",
                                             "none"]},
                         "confidence": {"type": "number"}},
@@ -90,13 +112,13 @@ SCHEMA = {
 }
 
 
-def route_llm(text: str, cfg: dict) -> dict:
+def route_llm(text: str, ctx: Context, cfg: dict) -> dict:
     """ Ask the local model to map a transcript onto the action vocabulary.
     Returns its parsed JSON reply. Raises on transport or parse failure. """
     o = {**DEFAULTS, **cfg.get("ollama", {})}
     payload = json.dumps({
         "model": o["model"],
-        "messages": [{"role": "system", "content": SYSTEM},
+        "messages": [{"role": "system", "content": render_system_prompt(ctx)},
                      {"role": "user", "content": text}],
         "stream": False,
         "format": SCHEMA,
@@ -119,7 +141,7 @@ def clamp_confidence(value: object) -> float:
         return 0.5
 
 
-def validate(reply: dict) -> Intent | None:
+def validate(reply: dict, ctx: Context) -> Intent | None:
     """ The trust boundary: only a whitelisted action with validated args
     becomes an Intent. Returns None for a deliberate "none". Raises
     ValueError on anything malformed: refused, never coerced. """
@@ -134,6 +156,17 @@ def validate(reply: dict) -> Intent | None:
         if not 1 <= n <= 10:
             raise ValueError(f"workspace {n} out of range 1-10")
         return Intent("switch_workspace", {"n": n}, confidence=confidence)
+    if action == "launch_app":
+        app = str(reply.get("app", "")).strip()
+        if not app:
+            raise ValueError("launch_app without an application name")
+        # re-resolved here, never trusted from the model: the command that
+        # runs is whatever THIS machine maps the name to, or nothing
+        command, certain = actions.resolve_app(app, ctx)
+        if command is None:
+            raise ValueError(f"no such application {app!r}")
+        return Intent("launch_app", {"app": app, "command": command},
+                      confidence=confidence, uncertain=not certain)
     if action in ("lock_screen", "run_updates"):
         return Intent(action, {}, privileged=action in actions.PRIVILEGED,
                       confidence=confidence)

@@ -7,15 +7,27 @@ i3 action, validates, and executes. Loaded by wspr through the plugin seam
 Verbs:
     route TEXT...   dry run: print the routed action, execute nothing
     exec TEXT...    route one transcript and execute it
+    context         show what wspr-i3 knows about this machine
 """
 
 import sys
 import threading
 
-from . import actions, router
+from . import actions, context, router
 
 # wspr transcribes each utterance on its own thread.
 _lock = threading.Lock()
+
+# Machine grounding, built once on first use and reused; handle() holds
+# _lock during routing, which also serializes the first build.
+_CTX: context.Context | None = None
+
+
+def _ctx() -> context.Context:
+    global _CTX
+    if _CTX is None:
+        _CTX = context.build()
+    return _CTX
 
 
 def needs_confirm(intent: router.Intent, cfg: dict) -> bool:
@@ -37,15 +49,16 @@ def handle(text: str, cfg: dict, dry_run: bool = False) -> None:
     with _lock:
         notify = (lambda *a: None) if dry_run else actions.notify
         print(f"heard: {text!r}")
+        ctx = _ctx()
         try:
-            reply = router.route_llm(text, cfg)
+            reply = router.route_llm(text, ctx, cfg)
         except Exception as e:
             print(f"  routing failed: {e}", file=sys.stderr)
             notify("wspr ▸ " + text, "routing failed (is Ollama up?)")
             return
         print(f"  llm: {reply}")
         try:
-            intent = router.validate(reply)
+            intent = router.validate(reply, ctx)
         except ValueError as e:
             print(f"  refused: {e}")
             notify("wspr ▸ " + text, f"refused: {e}")
@@ -84,6 +97,13 @@ def cli(argv: list[str], cfg: dict) -> int:
     text = " ".join(rest).strip()
     if cmd in ("route", "exec") and text:
         handle(text, cfg, dry_run=(cmd == "route"))
+        return 0
+    if cmd == "context" and not rest:
+        ctx = _ctx()
+        print(f"host:       {ctx.host}")
+        print(f"packages:   {len(ctx.packages)} declared")
+        print(f"workspaces: {ctx.workspaces}")
+        print(f"launch map: {len(ctx.launch_map)} aliases")
         return 0
     print(__doc__.strip(), file=sys.stderr)
     return 1

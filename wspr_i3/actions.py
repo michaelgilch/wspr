@@ -6,13 +6,10 @@ router decides *what* to run, handle() in __init__.py decides *whether*
 to run it.
 """
 
+import shutil
 import subprocess
-from pathlib import Path
 
-# Machine-specific script paths. These move into context.py when machine
-# grounding lands; lifting them into config is a noted follow-up.
-LOCK_SCRIPT = Path.home() / "dotfiles/bin/i3-lock"
-UPDATE_SCRIPT = Path.home() / ".config/polybar/scripts/system-update-interactive.sh"
+from .context import Context, LOCK_SCRIPT, UPDATE_SCRIPT
 
 
 # --- Helpers ----------------------------------------------------------------
@@ -40,11 +37,45 @@ def confirm(prompt: str) -> bool:
         return False
 
 
+# --- App resolution ---------------------------------------------------------
+
+def resolve_app(app: str, ctx: Context) -> tuple[str | None, bool]:
+    """ Map a spoken application name to a launch command.
+
+    Returns (command, certain): a trust gradient, not a boolean. A curated
+    launch-map hit is certain, as trustworthy as a keybinding. A bare match
+    against an installed binary still launches but is flagged so 'uncertain'
+    confirm mode asks first. (None, False) means nothing resolved: the
+    action is refused, not guessed at.
+    """
+    name = app.strip().lower()
+    if name in ctx.launch_map:
+        return ctx.launch_map[name], True
+    # an exact curated command (or its binary) is just as certain as the alias
+    if name in ctx.launch_map.values():
+        return name, True
+    curated = {cmd.split()[0] for cmd in ctx.launch_map.values()}
+    for token in (name.replace(" ", "-"), name.replace(" ", "")):
+        if shutil.which(token):
+            return token, token in curated
+    return None, False
+
+
 # --- Actions ---------------------------------------------------------------
 
 def switch_workspace(n: int) -> str:
     i3msg(f"workspace number {n}")
     return f"workspace {n}"
+
+
+def launch_app(app: str, command: str) -> str:
+    # command comes from the curated map or a which() hit, never raw model
+    # output, but refuse quoting/injection characters outright anyway:
+    # i3-msg exec hands the string to a shell.
+    if any(c in command for c in ";,$`'\""):
+        return f"refused suspicious command: {command}"
+    i3msg(f"exec --no-startup-id {command}")
+    return f"launching {app}" if app == command else f"launching {app} ({command})"
 
 
 def lock_screen() -> str:
@@ -65,6 +96,7 @@ def run_updates() -> str:
 # The LLM picks by name. validate() decides whether the pick may run.
 ACTIONS = {
     "switch_workspace": switch_workspace,
+    "launch_app": launch_app,
     "lock_screen": lock_screen,
     "run_updates": run_updates,
 }
