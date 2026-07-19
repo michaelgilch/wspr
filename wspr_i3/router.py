@@ -89,8 +89,11 @@ Examples:
 "workspace 4" -> {{"action": "switch_workspace", "n": 4, "confidence": 0.9}}
 "move this window to workspace five" -> {{"action": "move_to_workspace", "n": 5, "confidence": 0.95}}
 "put this on workspace three" -> {{"action": "move_to_workspace", "n": 3, "confidence": 0.85}}
+"put chrome on workspace three" -> {{"action": "move_window_to_workspace", "query": "chrome", "n": 3, "confidence": 0.9}}
+"move the terminal to workspace two" -> {{"action": "move_window_to_workspace", "query": "terminal", "n": 2, "confidence": 0.9}}
 "focus chrome" -> {{"action": "focus_window", "query": "chrome", "confidence": 0.95}}
 "show me the terminal" -> {{"action": "focus_window", "query": "terminal", "confidence": 0.8}}
+"open a terminal on workspace five" -> {{"action": "launch_app_on_workspace", "app": "terminal", "n": 5, "confidence": 0.95}}
 "open a terminal" -> {{"action": "launch_app", "app": "terminal", "confidence": 0.97}}
 "fire up the browser" -> {{"action": "launch_app", "app": "browser", "confidence": 0.9}}
 "please lock my computer" -> {{"action": "lock_screen", "confidence": 0.95}}
@@ -185,6 +188,32 @@ def validate(reply: dict, ctx: Context) -> Intent | None:
         # passed through with only a non-empty check: the query is matched
         # against the window list in Python and never reaches a shell
         return Intent("focus_window", {"query": query}, confidence=confidence)
+    if action == "move_window_to_workspace":
+        query = str(reply.get("query", "")).strip()
+        n = reply.get("n")
+        if not query:
+            raise ValueError("move_window_to_workspace without a query")
+        if not isinstance(n, int):
+            raise ValueError("move_window_to_workspace without a workspace number")
+        if not 1 <= n <= 10:
+            raise ValueError(f"workspace {n} out of range 1-10")
+        return Intent("move_window_to_workspace", {"query": query, "n": n},
+                      confidence=confidence)
+    if action == "launch_app_on_workspace":
+        app = str(reply.get("app", "")).strip()
+        n = reply.get("n")
+        if not app:
+            raise ValueError("launch_app_on_workspace without an application name")
+        if not isinstance(n, int):
+            raise ValueError("launch_app_on_workspace without a workspace number")
+        if not 1 <= n <= 10:
+            raise ValueError(f"workspace {n} out of range 1-10")
+        command, certain = actions.resolve_app(app, ctx)
+        if command is None:
+            raise ValueError(f"no such application {app!r}")
+        return Intent("launch_app_on_workspace",
+                      {"app": app, "command": command, "n": n},
+                      confidence=confidence, uncertain=not certain)
     if action == "launch_app":
         app = str(reply.get("app", "")).strip()
         if not app:

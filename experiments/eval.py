@@ -56,6 +56,18 @@ CASES = [
     ("move to workspace five", [("switch_workspace", {"n": 5})]),  # no object: you move
     ("focus chrome", [("focus_window", {})]),
     ("show me the browser", [("focus_window", {})]),
+    # named-window moves (vs focused-window moves above)
+    ("put chrome on workspace three", [("move_window_to_workspace", {"n": 3})]),
+    ("move the terminal to workspace two", [("move_window_to_workspace", {"n": 2})]),
+    ("send sublime to workspace eight", [("move_window_to_workspace", {"n": 8})]),
+    ("put chrome on workspace thirty", ["refused", "none"]),   # out of range
+    # launch on a target workspace
+    ("open a terminal on workspace five",
+     [("launch_app_on_workspace", {"command": "kitty", "n": 5})]),
+    ("open the browser on workspace one",
+     [("launch_app_on_workspace", {"command": "google-chrome-stable", "n": 1})]),
+    ("start audacity on workspace six",
+     [("launch_app_on_workspace", {"command": "audacity", "n": 6})]),
     # nonsense and near-misses
     ("make me a sandwich", ["none"]),
 ]

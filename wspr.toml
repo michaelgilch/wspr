@@ -45,13 +45,16 @@ compute_type = "int8"  # int8 (CPU), float16 (GPU)
 # [ollama] is the routing stage, used only by `command` bindings: the
 # transcript goes to this local Ollama model, which maps it onto the action
 # whitelist (or rejects it). Dictation never touches Ollama.
-# Measured on experiments/eval.py, 29 cases (2026-07-19):
-#   gemma4:latest  29/29, ~1.1s mean warm, 9.6GB VRAM held warm  <- default
-#   gemma3:1b      24/29, ~490ms mean, 815MB. Its misses include real
-#                  wrong actions ("Please move to workspace ten." moved
-#                  the window), not just safe refusals, once the window-
-#                  management vocabulary landed. Fine for a smaller
-#                  action set; not for this one.
+# Measured on experiments/eval.py, 36 cases (2026-07-19):
+#   gemma4:latest  36/36, ~1.0s mean warm, 9.6GB VRAM held warm  <- default
+#   gemma3:4b      32/36, ~500ms mean, 3.3GB. Misses are WRONG ACTIONS:
+#                  "Please move to workspace ten." / "move to workspace
+#                  five" moved the window instead of switching; "what
+#                  workspace am I on" hallucinated switch_workspace n=1.
+#   gemma3:1b      24/29 on the older 29-case battery, ~490ms, 815MB;
+#                  same class of wrong-action misses.
+# The move-vs-switch object-word distinction and none-discipline on
+# questions are what demand the e4b-class model.
 #[ollama]
 # url = "http://localhost:11434"
 # model = "gemma4:latest"

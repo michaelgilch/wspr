@@ -80,21 +80,58 @@ def launch_app(app: str, command: str) -> str:
     return f"launching {app}" if app == command else f"launching {app} ({command})"
 
 
+def launch_app_on_workspace(app: str, command: str, n: int) -> str:
+    # switch first, then launch, so the app opens there and you follow it;
+    # same metacharacter refusal as launch_app
+    if any(c in command for c in ";,$`'\""):
+        return f"refused suspicious command: {command}"
+    ok = BACKEND.command(f"workspace number {n}; exec --no-startup-id {command}")
+    if not ok:
+        return f"i3 refused to launch {command} on workspace {n}"
+    return f"launching {app} on workspace {n}"
+
+
 def move_to_workspace(n: int) -> str:
     # i3's move container operates on the focused window; no query needed
     ok = BACKEND.command(f"move container to workspace number {n}")
     return f"moved window to workspace {n}" if ok else "i3 refused the move"
 
 
+def match_windows(query: str) -> list[i3.Window]:
+    q = query.strip().lower()
+    return [w for w in BACKEND.windows()
+            if q in w.window_class.lower() or q in w.title.lower()]
+
+
+def narrow_matches(wins: list[i3.Window]) -> list[i3.Window]:
+    """ Disambiguation tiers for a multi-match query: prefer the focused
+    workspace, then the other monitor's visible workspace, then everything.
+    The first non-empty tier wins; if it still holds several windows, the
+    caller's picker runs over that narrowed tier rather than guessing among
+    equals. """
+    if len(wins) <= 1:
+        return wins
+    workspaces = BACKEND.workspaces()
+    focused = {w.name for w in workspaces if w.focused}
+    visible = {w.name for w in workspaces if w.visible and not w.focused}
+    for tier in (focused, visible):
+        narrowed = [w for w in wins if w.workspace in tier]
+        if narrowed:
+            return narrowed
+    return wins
+
+
 def focus_window(query: str) -> str:
     """ Find a window by app name or title words. Policy for ambiguity:
-    0 matches -> refuse; 1 -> act; many -> ask (rofi picker). A wrong
-    guess costs more trust than a picker costs time. """
-    q = query.strip().lower()
-    wins = [w for w in BACKEND.windows()
-            if q in w.window_class.lower() or q in w.title.lower()]
+    0 matches -> refuse; several -> narrow_matches tiers; still several ->
+    rofi picker. A wrong guess costs more trust than a picker costs time. """
+    wins = match_windows(query)
     if not wins:
         return f"no window matches {query!r}"
+    # focusing the already-focused window would waste the command; prefer
+    # the other candidates when there are any
+    others = [w for w in wins if not w.focused]
+    wins = narrow_matches(others or wins)
     win = wins[0] if len(wins) == 1 else pick_window(wins)
     if win is None:
         return "cancelled"
@@ -102,6 +139,21 @@ def focus_window(query: str) -> str:
     # the i3 command uses only the matched window's numeric con_id
     BACKEND.command(f"[con_id={win.con_id}] focus")
     return f"focused {win.window_class or win.title}"
+
+
+def move_window_to_workspace(query: str, n: int) -> str:
+    """ Move a NAMED window (vs move_to_workspace, which moves the focused
+    one). Same matching and disambiguation policy as focus_window. """
+    wins = narrow_matches(match_windows(query))
+    if not wins:
+        return f"no window matches {query!r}"
+    win = wins[0] if len(wins) == 1 else pick_window(wins)
+    if win is None:
+        return "cancelled"
+    ok = BACKEND.command(f"[con_id={win.con_id}] "
+                         f"move container to workspace number {n}")
+    name = win.window_class or win.title
+    return f"moved {name} to workspace {n}" if ok else "i3 refused the move"
 
 
 def pick_window(wins: list[i3.Window]) -> i3.Window | None:
@@ -136,8 +188,10 @@ def run_updates() -> str:
 ACTIONS = {
     "switch_workspace": switch_workspace,
     "move_to_workspace": move_to_workspace,
+    "move_window_to_workspace": move_window_to_workspace,
     "focus_window": focus_window,
     "launch_app": launch_app,
+    "launch_app_on_workspace": launch_app_on_workspace,
     "lock_screen": lock_screen,
     "run_updates": run_updates,
 }
@@ -161,6 +215,12 @@ SPECS = {
         "desc": "move the currently focused window to workspace n "
                 "(only when the user names an object: this, this window, it)",
     },
+    "move_window_to_workspace": {
+        "args": {"query": {"type": "string",
+                           "desc": "app name or window title words"},
+                 "n": {"type": "integer", "desc": "workspace number 1-10"}},
+        "desc": "move the already-open window matching query to workspace n",
+    },
     "focus_window": {
         "args": {"query": {"type": "string",
                            "desc": "app name or window title words"}},
@@ -169,6 +229,11 @@ SPECS = {
     "launch_app": {
         "args": {"app": {"type": "string", "desc": "application name"}},
         "desc": "open an application",
+    },
+    "launch_app_on_workspace": {
+        "args": {"app": {"type": "string", "desc": "application name"},
+                 "n": {"type": "integer", "desc": "workspace number 1-10"}},
+        "desc": "open an application on a specific workspace",
     },
     "lock_screen": {"args": {}, "desc": "lock the screen"},
     "run_updates": {"args": {},
