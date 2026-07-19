@@ -37,6 +37,20 @@ class Intent:
         return f"{self.name}({args})"
 
 
+def render_action_specs() -> str:
+    """ One prompt line per SPECS entry, so the model's menu and the
+    whitelist cannot drift apart. """
+    lines = []
+    for name, spec in actions.SPECS.items():
+        if spec["args"]:
+            args = ", ".join(f'"{a}": {m["desc"]}'
+                             for a, m in spec["args"].items())
+            lines.append(f"  {name}: args {{{args}}} - {spec['desc']}")
+        else:
+            lines.append(f"  {name}: no args - {spec['desc']}")
+    return "\n".join(lines)
+
+
 def render_system_prompt(ctx: Context) -> str:
     """ The model's briefing, grounded in this machine: its workspaces, its
     curated aliases, its declared packages. What lets a small local model
@@ -54,11 +68,7 @@ Application aliases: {aliases}
 Installed packages: {pkgs}
 
 Actions:
-  switch_workspace: args {{"n": integer 1-10}} - focus i3 workspace number n
-  launch_app: args {{"app": application name}} - open an application
-  lock_screen: no args - lock the screen
-  run_updates: no args - open the interactive system update window
-  none: no args - the request does not map to any available action
+{render_action_specs()}
 
 Rules:
 - Reply with ONLY one JSON object: {{"action": <name>, "n": <integer, \
@@ -67,12 +77,16 @@ switch_workspace only>, "app": <string, launch_app only>, \
 - confidence is how sure you are that this is what the user meant.
 - For launch_app, "app" is the application the user means; prefer a name \
 from the alias or package lists above when one fits.
+- When the user describes an application by what it does ("photo editor",
+"music player"), pick the installed package that does that job; if no
+installed package fits, use "none".
 - Use action "none" for anything else, including workspace numbers \
 outside 1-10.
 
 Examples:
 "Switch to workspace two." -> {{"action": "switch_workspace", "n": 2, "confidence": 0.98}}
 "go to the ninth workspace" -> {{"action": "switch_workspace", "n": 9, "confidence": 0.95}}
+"workspace 4" -> {{"action": "switch_workspace", "n": 4, "confidence": 0.9}}
 "open a terminal" -> {{"action": "launch_app", "app": "terminal", "confidence": 0.97}}
 "fire up the browser" -> {{"action": "launch_app", "app": "browser", "confidence": 0.9}}
 "please lock my computer" -> {{"action": "lock_screen", "confidence": 0.95}}
@@ -80,36 +94,41 @@ Examples:
 "switch to workspace fifty" -> {{"action": "none", "confidence": 0.85}}
 "workspace" -> {{"action": "none", "confidence": 0.6}}
 "close workspace two" -> {{"action": "none", "confidence": 0.7}}
+"make me a sandwich" -> {{"action": "none", "confidence": 0.95}}
+"move this window to workspace five" -> {{"action": "none", "confidence": 0.8}}
+"turn up the volume" -> {{"action": "none", "confidence": 0.9}}
 
 Transcripts come from speech recognition and may contain extra punctuation, \
 capitalization, or filler words."""
 
-# Constrained decode. The model can only emit tokens that fit this schema.
-# One branch per action shape: a flat schema can't make "n" required for
-# switch_workspace but absent for lock_screen, and with "n" merely optional
-# the model happily omits it ("go to workspace four" -> no n at all).
-# Structure only, no min/max on n: a range constraint would truncate an
-# out-of-range answer into a valid-looking one ("eleven" -> 1). The 1-10
-# range is validate()'s job, where a violation is refused, not mangled.
-SCHEMA = {
-    "oneOf": [
-        {"type": "object",
-         "properties": {"action": {"const": "switch_workspace"},
-                        "n": {"type": "integer"},
-                        "confidence": {"type": "number"}},
-         "required": ["action", "n", "confidence"]},
-        {"type": "object",
-         "properties": {"action": {"const": "launch_app"},
-                        "app": {"type": "string"},
-                        "confidence": {"type": "number"}},
-         "required": ["action", "app", "confidence"]},
-        {"type": "object",
-         "properties": {"action": {"enum": ["lock_screen", "run_updates",
-                                            "none"]},
-                        "confidence": {"type": "number"}},
-         "required": ["action", "confidence"]},
-    ],
-}
+def render_schema() -> dict:
+    """ Constrained decode, rendered from SPECS. One oneOf branch per action
+    that takes args, so the grammar itself requires each action's args
+    exactly when that action is chosen (a flat schema can't make "n"
+    required for switch_workspace but absent for lock_screen, and a merely
+    optional arg gets omitted by the model). Arg-less actions share one
+    branch. Structure only, no ranges: a range constraint would truncate an
+    out-of-range answer into a valid-looking one ("eleven" -> 1); ranges
+    are validate()'s job, where a violation is refused, not mangled. """
+    branches, no_args = [], []
+    for name, spec in actions.SPECS.items():
+        if not spec["args"]:
+            no_args.append(name)
+            continue
+        props = {"action": {"const": name},
+                 "confidence": {"type": "number"}}
+        for arg, meta in spec["args"].items():
+            props[arg] = {"type": meta["type"]}
+        branches.append({"type": "object", "properties": props,
+                         "required": ["action", *spec["args"], "confidence"]})
+    branches.append({"type": "object",
+                     "properties": {"action": {"enum": no_args},
+                                    "confidence": {"type": "number"}},
+                     "required": ["action", "confidence"]})
+    return {"oneOf": branches}
+
+
+SCHEMA = render_schema()   # SPECS is static; render once at import
 
 
 def route_llm(text: str, ctx: Context, cfg: dict) -> dict:

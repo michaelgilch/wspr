@@ -104,3 +104,24 @@ ACTIONS = {
 # Privileged actions confirm in EVERY confirm mode. A property of the
 # action, not the routing: however certain the route, a human approves.
 PRIVILEGED = {"run_updates"}
+
+# What the LLM is told it may emit: the single source of truth from which
+# the router renders both the system prompt's action list and the reply
+# schema. Add an action here (plus its ACTIONS entry and validate() arm)
+# and the prompt and grammar stay in sync by construction.
+# Each arg: name -> {"type": JSON-schema type, "desc": prompt description}.
+SPECS = {
+    "switch_workspace": {
+        "args": {"n": {"type": "integer", "desc": "workspace number 1-10"}},
+        "desc": "focus i3 workspace number n",
+    },
+    "launch_app": {
+        "args": {"app": {"type": "string", "desc": "application name"}},
+        "desc": "open an application",
+    },
+    "lock_screen": {"args": {}, "desc": "lock the screen"},
+    "run_updates": {"args": {},
+                    "desc": "open the interactive system update window"},
+    "none": {"args": {},
+             "desc": "the request does not map to any available action"},
+}
