@@ -13,7 +13,7 @@ from .context import Context
 # name what it overrides.
 DEFAULTS = {
     "url": "http://localhost:11434",
-    "model": "gemma3:1b",
+    "model": "gemma4:latest",
     "timeout": 30,        # seconds to wait for a routing reply
     "keep_alive": "30m",  # how long Ollama keeps the model warm
     "confidence_threshold": 0.7,  # below this, 'uncertain' mode asks first
@@ -87,6 +87,10 @@ Examples:
 "Switch to workspace two." -> {{"action": "switch_workspace", "n": 2, "confidence": 0.98}}
 "go to the ninth workspace" -> {{"action": "switch_workspace", "n": 9, "confidence": 0.95}}
 "workspace 4" -> {{"action": "switch_workspace", "n": 4, "confidence": 0.9}}
+"move this window to workspace five" -> {{"action": "move_to_workspace", "n": 5, "confidence": 0.95}}
+"put this on workspace three" -> {{"action": "move_to_workspace", "n": 3, "confidence": 0.85}}
+"focus chrome" -> {{"action": "focus_window", "query": "chrome", "confidence": 0.95}}
+"show me the terminal" -> {{"action": "focus_window", "query": "terminal", "confidence": 0.8}}
 "open a terminal" -> {{"action": "launch_app", "app": "terminal", "confidence": 0.97}}
 "fire up the browser" -> {{"action": "launch_app", "app": "browser", "confidence": 0.9}}
 "please lock my computer" -> {{"action": "lock_screen", "confidence": 0.95}}
@@ -95,7 +99,6 @@ Examples:
 "workspace" -> {{"action": "none", "confidence": 0.6}}
 "close workspace two" -> {{"action": "none", "confidence": 0.7}}
 "make me a sandwich" -> {{"action": "none", "confidence": 0.95}}
-"move this window to workspace five" -> {{"action": "none", "confidence": 0.8}}
 "turn up the volume" -> {{"action": "none", "confidence": 0.9}}
 
 Transcripts come from speech recognition and may contain extra punctuation, \
@@ -168,13 +171,20 @@ def validate(reply: dict, ctx: Context) -> Intent | None:
     if action == "none":
         return None
     confidence = clamp_confidence(reply.get("confidence", 0.5))
-    if action == "switch_workspace":
+    if action in ("switch_workspace", "move_to_workspace"):
         n = reply.get("n")
         if not isinstance(n, int):
-            raise ValueError("switch_workspace without a workspace number")
+            raise ValueError(f"{action} without a workspace number")
         if not 1 <= n <= 10:
             raise ValueError(f"workspace {n} out of range 1-10")
-        return Intent("switch_workspace", {"n": n}, confidence=confidence)
+        return Intent(action, {"n": n}, confidence=confidence)
+    if action == "focus_window":
+        query = str(reply.get("query", "")).strip()
+        if not query:
+            raise ValueError("focus_window without a query")
+        # passed through with only a non-empty check: the query is matched
+        # against the window list in Python and never reaches a shell
+        return Intent("focus_window", {"query": query}, confidence=confidence)
     if action == "launch_app":
         app = str(reply.get("app", "")).strip()
         if not app:

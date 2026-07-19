@@ -8,12 +8,13 @@ Verbs:
     route TEXT...   dry run: print the routed action, execute nothing
     exec TEXT...    route one transcript and execute it
     context         show what wspr-i3 knows about this machine
+    windows         list the windows wspr-i3 sees (debug)
 """
 
 import sys
 import threading
 
-from . import actions, context, router
+from . import actions, context, i3, router
 
 # wspr transcribes each utterance on its own thread.
 _lock = threading.Lock()
@@ -28,6 +29,18 @@ def _ctx() -> context.Context:
     if _CTX is None:
         _CTX = context.build()
     return _CTX
+
+
+# The window-manager transport is chosen by config once per process.
+# get_backend fails loud if config names i3ipc without the package.
+_backend_wired = False
+
+
+def _wire_backend(cfg: dict) -> None:
+    global _backend_wired
+    if not _backend_wired:
+        actions.BACKEND = i3.get_backend(cfg)
+        _backend_wired = True
 
 
 def needs_confirm(intent: router.Intent, cfg: dict) -> bool:
@@ -47,6 +60,7 @@ def needs_confirm(intent: router.Intent, cfg: dict) -> bool:
 
 def handle(text: str, cfg: dict, dry_run: bool = False) -> None:
     with _lock:
+        _wire_backend(cfg)
         notify = (lambda *a: None) if dry_run else actions.notify
         print(f"heard: {text!r}")
         ctx = _ctx()
@@ -104,6 +118,12 @@ def cli(argv: list[str], cfg: dict) -> int:
         print(f"packages:   {len(ctx.packages)} declared")
         print(f"workspaces: {ctx.workspaces}")
         print(f"launch map: {len(ctx.launch_map)} aliases")
+        return 0
+    if cmd == "windows" and not rest:
+        _wire_backend(cfg)
+        for w in actions.BACKEND.windows():
+            mark = "*" if w.focused else " "
+            print(f"{mark} [{w.workspace}] {w.window_class}: {w.title[:60]}")
         return 0
     print(__doc__.strip(), file=sys.stderr)
     return 1

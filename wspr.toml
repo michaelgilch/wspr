@@ -45,9 +45,16 @@ compute_type = "int8"  # int8 (CPU), float16 (GPU)
 # [ollama] is the routing stage, used only by `command` bindings: the
 # transcript goes to this local Ollama model, which maps it onto the action
 # whitelist (or rejects it). Dictation never touches Ollama.
+# Measured on experiments/eval.py, 29 cases (2026-07-19):
+#   gemma4:latest  29/29, ~1.1s mean warm, 9.6GB VRAM held warm  <- default
+#   gemma3:1b      24/29, ~490ms mean, 815MB. Its misses include real
+#                  wrong actions ("Please move to workspace ten." moved
+#                  the window), not just safe refusals, once the window-
+#                  management vocabulary landed. Fine for a smaller
+#                  action set; not for this one.
 #[ollama]
 # url = "http://localhost:11434"
-# model = "gemma3:1b"
+# model = "gemma4:latest"
 # timeout = 30         # seconds to wait for a routing reply
 # keep_alive = "30m"   # how long Ollama keeps the model warm after a request
 # confidence_threshold = 0.7   # below this, 'uncertain' mode asks first
@@ -59,3 +66,10 @@ compute_type = "int8"  # int8 (CPU), float16 (GPU)
 #   never     - confirm only privileged actions
 #[confirm]
 # mode = "uncertain"
+
+# [i3] selects how the plugin talks to the window manager.
+#   i3msg - stdlib subprocess transport (the default, zero dependencies)
+#   i3ipc - persistent IPC via python-i3ipc (needed for event
+#           subscription later; fails loud at startup if not installed)
+#[i3]
+# backend = "i3msg"

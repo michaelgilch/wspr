@@ -9,16 +9,16 @@ to run it.
 import shutil
 import subprocess
 
+from . import i3
 from .context import Context, LOCK_SCRIPT, UPDATE_SCRIPT
+
+# The window-manager transport. Actions are plain functions, so they take
+# their backend from this module-level slot; the plugin surface replaces it
+# from config at first use.
+BACKEND: i3.Backend = i3.I3MsgBackend()
 
 
 # --- Helpers ----------------------------------------------------------------
-
-def i3msg(*cmds: str) -> None:
-    """ Send one or more commands to i3 in a single i3-msg call """
-    subprocess.run(["i3-msg", "; ".join(cmds)], check=False,
-                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-
 
 def notify(summary: str, body: str = "") -> None:
     """ Desktop notification """
@@ -64,8 +64,8 @@ def resolve_app(app: str, ctx: Context) -> tuple[str | None, bool]:
 # --- Actions ---------------------------------------------------------------
 
 def switch_workspace(n: int) -> str:
-    i3msg(f"workspace number {n}")
-    return f"workspace {n}"
+    ok = BACKEND.command(f"workspace number {n}")
+    return f"workspace {n}" if ok else f"i3 refused: workspace {n}"
 
 
 def launch_app(app: str, command: str) -> str:
@@ -74,8 +74,47 @@ def launch_app(app: str, command: str) -> str:
     # i3-msg exec hands the string to a shell.
     if any(c in command for c in ";,$`'\""):
         return f"refused suspicious command: {command}"
-    i3msg(f"exec --no-startup-id {command}")
+    ok = BACKEND.command(f"exec --no-startup-id {command}")
+    if not ok:
+        return f"i3 refused to launch {command}"
     return f"launching {app}" if app == command else f"launching {app} ({command})"
+
+
+def move_to_workspace(n: int) -> str:
+    # i3's move container operates on the focused window; no query needed
+    ok = BACKEND.command(f"move container to workspace number {n}")
+    return f"moved window to workspace {n}" if ok else "i3 refused the move"
+
+
+def focus_window(query: str) -> str:
+    """ Find a window by app name or title words. Policy for ambiguity:
+    0 matches -> refuse; 1 -> act; many -> ask (rofi picker). A wrong
+    guess costs more trust than a picker costs time. """
+    q = query.strip().lower()
+    wins = [w for w in BACKEND.windows()
+            if q in w.window_class.lower() or q in w.title.lower()]
+    if not wins:
+        return f"no window matches {query!r}"
+    win = wins[0] if len(wins) == 1 else pick_window(wins)
+    if win is None:
+        return "cancelled"
+    # the spoken query never reaches a shell: it is matched in Python, and
+    # the i3 command uses only the matched window's numeric con_id
+    BACKEND.command(f"[con_id={win.con_id}] focus")
+    return f"focused {win.window_class or win.title}"
+
+
+def pick_window(wins: list[i3.Window]) -> i3.Window | None:
+    """ Human disambiguation: a rofi line per candidate, index comes back. """
+    lines = "\n".join(f"[{w.workspace}] {w.window_class}: {w.title[:60]}"
+                      for w in wins)
+    out = subprocess.run(
+        ["rofi", "-dmenu", "-p", "which window?", "-no-custom", "-format", "i"],
+        input=lines, capture_output=True, text=True, check=False)
+    try:
+        return wins[int(out.stdout.strip())]
+    except (ValueError, IndexError):
+        return None
 
 
 def lock_screen() -> str:
@@ -96,6 +135,8 @@ def run_updates() -> str:
 # The LLM picks by name. validate() decides whether the pick may run.
 ACTIONS = {
     "switch_workspace": switch_workspace,
+    "move_to_workspace": move_to_workspace,
+    "focus_window": focus_window,
     "launch_app": launch_app,
     "lock_screen": lock_screen,
     "run_updates": run_updates,
@@ -114,6 +155,16 @@ SPECS = {
     "switch_workspace": {
         "args": {"n": {"type": "integer", "desc": "workspace number 1-10"}},
         "desc": "focus i3 workspace number n",
+    },
+    "move_to_workspace": {
+        "args": {"n": {"type": "integer", "desc": "workspace number 1-10"}},
+        "desc": "move the currently focused window to workspace n "
+                "(only when the user names an object: this, this window, it)",
+    },
+    "focus_window": {
+        "args": {"query": {"type": "string",
+                           "desc": "app name or window title words"}},
+        "desc": "focus an already-open window matching the query",
     },
     "launch_app": {
         "args": {"app": {"type": "string", "desc": "application name"}},

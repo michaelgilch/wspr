@@ -50,9 +50,14 @@ CASES = [
     ("please lock my computer", [("lock_screen", {})]),
     ("run updates", [("run_updates", {})]),
     ("update the system", [("run_updates", {})]),
+    # window management: object words decide move vs switch
+    ("move this window to workspace five", [("move_to_workspace", {"n": 5})]),
+    ("put this on workspace three", [("move_to_workspace", {"n": 3})]),
+    ("move to workspace five", [("switch_workspace", {"n": 5})]),  # no object: you move
+    ("focus chrome", [("focus_window", {})]),
+    ("show me the browser", [("focus_window", {})]),
     # nonsense and near-misses
     ("make me a sandwich", ["none"]),
-    ("move this window to workspace five", ["none"]),      # not in vocab yet
 ]
 
 
