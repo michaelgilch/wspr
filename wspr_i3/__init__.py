@@ -5,12 +5,14 @@ i3 action, validates, and executes. Loaded by wspr through the plugin seam
 (module = "wspr_i3" under [command] in wspr.toml).
 
 Verbs:
+    prompt          rofi text entry -> route and execute
     route TEXT...   dry run: print the routed action, execute nothing
     exec TEXT...    route one transcript and execute it
     context         show what wspr-i3 knows about this machine
     windows         list the windows wspr-i3 sees (debug)
 """
 
+import subprocess
 import sys
 import threading
 
@@ -43,9 +45,29 @@ def _wire_backend(cfg: dict) -> None:
         _backend_wired = True
 
 
+def prepare(cfg: dict) -> None:
+    """ Daemon startup hook: wire the WM backend and build the machine
+    context now, so a broken command setup fails loudly before any keys
+    are grabbed rather than on the first utterance. """
+    _wire_backend(cfg)
+    _ctx()
+
+
+def vocabulary() -> str:
+    """ Bias text for whisper's initial_prompt on command bindings: the words
+    commands are made of, phrased as prose because whisper conditions on it
+    as preceding transcript. Kept well under whisper's 224-token prompt
+    budget; a long prompt invites hallucinated vocabulary on silence. """
+    ctx = _ctx()
+    names = sorted(set(ctx.launch_map) | set(ctx.workspaces.values()))
+    return ("Switch to workspace two, focus the window, open the terminal, "
+            "move this to workspace five, lock the screen, run updates. "
+            + ", ".join(names) + ".")
+
+
 def needs_confirm(intent: router.Intent, cfg: dict) -> bool:
-    # Config defaults are read locally here until prepare() formalizes
-    # merging at daemon startup.
+    # Config defaults merge at the read site, the one path shared by the
+    # daemon, the CLI verbs, and the experiments.
     if intent.privileged:
         return True                       # privileged ALWAYS confirms
     mode = cfg.get("confirm", {}).get("mode", "uncertain")
@@ -64,25 +86,28 @@ def handle(text: str, cfg: dict, dry_run: bool = False) -> None:
         notify = (lambda *a: None) if dry_run else actions.notify
         print(f"heard: {text!r}")
         ctx = _ctx()
-        try:
-            reply = router.route_llm(text, ctx, cfg)
-        except Exception as e:
-            print(f"  routing failed: {e}", file=sys.stderr)
-            notify("wspr ▸ " + text, "routing failed (is Ollama up?)")
-            return
-        print(f"  llm: {reply}")
-        try:
-            intent = router.validate(reply, ctx)
-        except ValueError as e:
-            print(f"  refused: {e}")
-            notify("wspr ▸ " + text, f"refused: {e}")
-            return
+        intent = router.route_fast(text, ctx)
+        if intent is None:
+            try:
+                reply = router.route_llm(text, ctx, cfg)
+            except Exception as e:
+                print(f"  routing failed: {e}", file=sys.stderr)
+                notify("wspr ▸ " + text, "routing failed (is Ollama up?)")
+                return
+            print(f"  llm: {reply}")
+            try:
+                intent = router.validate(reply, ctx)
+            except ValueError as e:
+                print(f"  refused: {e}")
+                notify("wspr ▸ " + text, f"refused: {e}")
+                return
         if intent is None:
             print("  no matching command")
             notify("wspr ▸ " + text, "no matching command")
             return
         intent.heard = text
-        print(f"  intent: {intent.describe()}  [privileged={intent.privileged} "
+        print(f"  intent: {intent.describe()}  [source={intent.source} "
+              f"privileged={intent.privileged} "
               f"confidence={intent.confidence:.2f} "
               f"confirm={needs_confirm(intent, cfg)}]")
         if dry_run:
@@ -102,6 +127,17 @@ def handle(text: str, cfg: dict, dry_run: bool = False) -> None:
         notify("wspr ▸ " + text, result)
 
 
+def prompt(cfg: dict) -> None:
+    """ rofi text entry -> handle(), in this process. The typed path and the
+    voice path share one pipeline (same routing, same confirm gates), but this
+    runs outside the daemon's lock -- fine for one human at one keyboard. """
+    out = subprocess.run(["rofi", "-dmenu", "-p", "wspr", "-lines", "0"],
+                         capture_output=True, text=True, check=False)
+    text = out.stdout.strip()
+    if text:
+        handle(text, cfg)
+
+
 # --- wspr CLI surface -------------------------------------------------------
 
 def cli(argv: list[str], cfg: dict) -> int:
@@ -109,6 +145,9 @@ def cli(argv: list[str], cfg: dict) -> int:
     Returns a process exit code. """
     cmd, *rest = argv
     text = " ".join(rest).strip()
+    if cmd == "prompt" and not rest:
+        prompt(cfg)
+        return 0
     if cmd in ("route", "exec") and text:
         handle(text, cfg, dry_run=(cmd == "route"))
         return 0

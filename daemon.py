@@ -63,6 +63,10 @@ class Binding:
     keycode:     int                    # X keycode for the trigger key
     sink:        str = "type"           # where to send: type | socket | command
     socket_path: str = DEFAULT_SOCKET   # destination when sink == "socket"
+    vocab_bias:  bool = True            # command bindings: bias whisper with
+                                        # the plugin's vocabulary()
+    initial_prompt: str | None = None   # bias text passed to model.transcribe
+                                        # (config override, or wired at startup)
 
 
 def trigger_keysym(name: str) -> int:
@@ -237,6 +241,9 @@ def parse_bindings(cfg: dict, disp) -> list[Binding]:
         binding = parse_hotkey(combo, disp)
         binding.sink = sink
         binding.socket_path = str(entry.get("socket", DEFAULT_SOCKET))
+        binding.vocab_bias = bool(entry.get("vocab_bias", True))
+        if prompt := entry.get("initial_prompt"):
+            binding.initial_prompt = str(prompt)
         # X refuses a second grab of the same key+modifiers, so catch it here.
         if (binding.keycode, binding.mask) in seen:
             raise ValueError(f"Duplicate hotkey {combo!r}")
@@ -282,6 +289,14 @@ def run(cfg: dict) -> None:
         plugin = wspr.load_plugin(cfg)
         if hasattr(plugin, "prepare"):
             plugin.prepare(cfg)
+        # Whisper hears command words better when primed with them: bias
+        # each command binding with the plugin's vocabulary unless the
+        # binding overrides the text or opts out.
+        if hasattr(plugin, "vocabulary"):
+            vocab = plugin.vocabulary()
+            for b in bindings:
+                if b.sink == "command" and b.vocab_bias and b.initial_prompt is None:
+                    b.initial_prompt = vocab
 
     # Grabbing keys in X is weird!
     # X returns keygrabs asynchronously, so it may take a while, and cause issues
@@ -314,6 +329,8 @@ def run(cfg: dict) -> None:
     print("Ready. Hold a hotkey to record, release to transcribe. Ctrl-C to quit.")
     for b in bindings:
         dest = f"socket {b.socket_path}" if b.sink == "socket" else b.sink
+        if b.initial_prompt:
+            dest += "  (vocab-biased)"
         print(f"  {b.combo}  ->  {dest}")
     notify("Ready: " + ", ".join(b.combo for b in bindings))
 
@@ -358,7 +375,8 @@ def run(cfg: dict) -> None:
         # Runs on a background thread so transcription doesn't block the event
         # loop and the hotkey stays responsive for the next take.
         print(f"Transcribing {duration:.1f}s of audio...")
-        segments, _ = model.transcribe(audio, language="en")
+        segments, _ = model.transcribe(audio, language="en",
+                                       initial_prompt=binding.initial_prompt)
         text = " ".join(seg.text.strip() for seg in segments).strip()
         if text:
             print(f"  -> {text!r}")

@@ -8,6 +8,13 @@
 #   command - handed to the command plugin named under [command], which
 #             routes it through a local LLM (Ollama) onto a whitelisted
 #             action and executes it (see [command], [ollama])
+#
+# Optional per-binding keys:
+#   vocab_bias     - command bindings: prime whisper with the plugin's
+#                    command vocabulary so command words transcribe
+#                    reliably (default true)
+#   initial_prompt - literal bias text for whisper instead; works on any
+#                    binding and overrides vocab_bias
 
 [[hotkeys]]
 combo = "super+space"
@@ -20,6 +27,7 @@ sink = "type"
 #[[hotkeys]]
 #combo = "super+ctrl+space"
 #sink = "command"
+#vocab_bias = true
 
 # Example socket binding.
 #[[hotkeys]]

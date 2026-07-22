@@ -2,6 +2,7 @@
 """
 
 import json
+import re
 import urllib.request
 from dataclasses import dataclass, field
 
@@ -30,11 +31,58 @@ class Intent:
     privileged: bool = False    # confirms in every mode
     confidence: float = 1.0     # the model's own certainty, clamped to [0,1]
     uncertain: bool = False     # fuzzy resolution -> confirm in 'uncertain' mode
+    source: str = "llm"         # llm | fast
     heard: str = ""
 
     def describe(self) -> str:
         args = ", ".join(f"{k}={v}" for k, v in self.args.items())
         return f"{self.name}({args})"
+
+
+# ------------------------------ fast path -----------------------------------
+# Deliberately tiny: exactly two rules, matching only what is unambiguous
+# and certain. Everything else earns the LLM's judgment. What this buys:
+# the two highest-frequency commands are instant, offline, and keep working
+# when Ollama is down.
+
+WORD2NUM = {w: i for i, w in enumerate(
+    "zero one two three four five six seven eight nine ten".split())}
+
+
+def to_num(token: str) -> int | None:
+    """ Whisper writes numbers as words or digits, unpredictably. """
+    token = token.strip().lower()
+    return int(token) if token.isdigit() else WORD2NUM.get(token)
+
+
+def normalize(text: str) -> str:
+    """ Whisper writes prose ("Go to workspace two."); the fast-path
+    patterns compare lowercase and unpunctuated. """
+    return re.sub(r"[^\w\s]", "", text.lower()).strip()
+
+
+def route_fast(text: str, ctx: Context) -> Intent | None:
+    """ The deterministic pre-layer. Both patterns are anchored to the WHOLE
+    normalized transcript, so an object phrase like "move this window to
+    workspace five" cannot half-match; anything with extra words falls
+    through to the model. """
+    t = normalize(text)
+
+    # workspace switch: bare or with a navigation prefix. "move to" with no
+    # object means you are the thing being moved, i.e. a switch.
+    m = re.fullmatch(r"(?:switch to |go to |move to )?workspace (\w+)", t)
+    if m and (n := to_num(m.group(1))) is not None and 1 <= n <= 10:
+        return Intent("switch_workspace", {"n": n}, source="fast")
+
+    # launch, curated aliases only: a hit here is as certain as a keybinding;
+    # anything fuzzier (installed binaries, descriptions) is LLM territory
+    m = re.fullmatch(r"(?:open|launch|start)(?: up)?(?: a| an| the| my)? (.+)", t)
+    if m and (name := m.group(1).strip()) in ctx.launch_map:
+        return Intent("launch_app",
+                      {"app": name, "command": ctx.launch_map[name]},
+                      source="fast")
+
+    return None
 
 
 def render_action_specs() -> str:
